@@ -3,6 +3,7 @@ import requests
 import tempfile
 import os
 import re
+import traceback
 
 st.set_page_config(page_title="Edytor XML/CSV z AI", layout="centered")
 st.title("🔧 AI Edytor plików XML i CSV")
@@ -81,6 +82,9 @@ Nie dodawaj żadnych opisów ani komentarzy. Zwróć wyłącznie czysty kod Pyth
                     code = re.sub(r"input_path\s*=.*", "", code)
                     code = re.sub(r"output_path\s*=.*", "", code)
 
+                    st.text("\n[DEBUG] Wykonywany kod:")
+                    st.code(code, language="python")
+
                     try:
                         exec(code, {"input_path": input_path, "output_path": output_path})
                         if os.path.exists(output_path):
@@ -94,4 +98,5 @@ Nie dodawaj żadnych opisów ani komentarzy. Zwróć wyłącznie czysty kod Pyth
                         else:
                             st.error("Nie znaleziono pliku wynikowego.")
                     except Exception as e:
-                        st.error(f"Błąd wykonania kodu: {e}")
+                        st.error("Błąd wykonania kodu:")
+                        st.exception(traceback.format_exc())
