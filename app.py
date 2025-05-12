@@ -11,8 +11,14 @@ st.title("🔧 AI Edytor plików XML i CSV")
 uploaded_file = st.file_uploader("Wgraj plik XML lub CSV", type=["xml", "csv"])
 instruction = st.text_area("Instrukcja modyfikacji (w języku naturalnym)")
 
-# Wybór modelu - tylko openai/gpt-4o
-model = "openai/gpt-4o"
+# Wybór modelu
+model = st.selectbox("Wybierz model LLM (OpenRouter)", [
+    "openai/gpt-4o",
+    "openai/gpt-4-turbo",
+    "anthropic/claude-3-opus",
+    "mistralai/mistral-7b-instruct",
+    "google/gemini-pro"
+])
 
 # --- Wczytaj klucz API z sekcji 'Secrets' w Streamlit Cloud ---
 api_key = st.secrets["OPENROUTER_API_KEY"]
