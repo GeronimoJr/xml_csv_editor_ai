@@ -86,7 +86,12 @@ Nie dodawaj żadnych opisów ani komentarzy. Zwróć wyłącznie czysty kod Pyth
                     st.code(code, language="python")
 
                     try:
-                        exec(code, {"input_path": input_path, "output_path": output_path})
+                        exec_globals = {
+                            "__builtins__": __builtins__,
+                            "input_path": input_path,
+                            "output_path": output_path
+                        }
+                        exec(code, exec_globals)
                         if os.path.exists(output_path):
                             with open(output_path, "rb") as f:
                                 st.download_button(
