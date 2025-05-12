@@ -2,6 +2,7 @@ import streamlit as st
 import requests
 import tempfile
 import os
+import re
 
 st.set_page_config(page_title="Edytor XML/CSV z AI", layout="centered")
 st.title("🔧 AI Edytor plików XML i CSV")
@@ -14,8 +15,7 @@ model = st.selectbox("Wybierz model LLM (OpenRouter)", [
     "openai/gpt-4-turbo",
     "anthropic/claude-3-opus",
     "mistralai/mistral-7b-instruct",
-    "google/gemini-pro",
-    "mistralai/mistral-small-3.1-24b-instruct:free"
+    "google/gemini-pro"
 ])
 
 # --- Wczytaj klucz API z sekcji 'Secrets' w Streamlit Cloud ---
@@ -38,6 +38,8 @@ Wygeneruj kompletny kod Python, który:
 1. Wczytuje plik {file_type}
 2. Dokonuje modyfikacji zgodnie z instrukcją
 3. Zapisuje wynikowy plik jako 'output.{file_type}'
+
+Zwróć wyłącznie czysty kod w Pythonie, bez żadnych opisów ani znaczników Markdown.
     """
 
     headers = {
@@ -55,6 +57,11 @@ Wygeneruj kompletny kod Python, który:
     with st.spinner("Generowanie kodu Python..."):
         res = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data)
         code = res.json()["choices"][0]["message"]["content"]
+
+        # Usuń znaczniki Markdown, jeśli występują
+        code = re.sub(r"```(?:python)?\\n", "", code)
+        code = code.replace("```", "")
+
         st.subheader("Wygenerowany kod:")
         st.code(code, language="python")
 
