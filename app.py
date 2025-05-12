@@ -4,6 +4,9 @@ import tempfile
 import os
 import re
 import traceback
+from datetime import datetime
+from pydrive2.auth import GoogleAuth
+from pydrive2.drive import GoogleDrive
 
 st.set_page_config(page_title="Edytor XML/CSV z AI", layout="centered")
 st.title("🔧 AI Edytor plików XML i CSV")
@@ -13,6 +16,10 @@ if "generated_code" not in st.session_state:
     st.session_state.generated_code = ""
 if "output_bytes" not in st.session_state:
     st.session_state.output_bytes = None
+
+# --- Konfiguracja Google Drive z Service Account ---
+drive_folder_id = st.secrets.get("GOOGLE_DRIVE_FOLDER_ID")
+service_account_json = st.secrets.get("GOOGLE_DRIVE_CREDENTIALS_JSON")
 
 uploaded_file = st.file_uploader("Wgraj plik XML lub CSV", type=["xml", "csv"])
 instruction = st.text_area("Instrukcja modyfikacji (w języku naturalnym)")
@@ -109,6 +116,32 @@ Nie dodawaj żadnych opisów ani komentarzy. Zwróć wyłącznie czysty kod Pyth
                     if os.path.exists(output_path):
                         with open(output_path, "rb") as f:
                             st.session_state.output_bytes = f.read()
+
+                        now = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                        log_filename = f"history_{now}.txt"
+                        result_filename = f"output_{now}.{file_type}"
+
+                        with open(log_filename, "w", encoding="utf-8") as log:
+                            log.write(f"INSTRUCTION:\n{instruction}\n\nCODE:\n{st.session_state.generated_code}")
+
+                        if drive_folder_id and service_account_json:
+                            with open("creds.json", "w") as creds_file:
+                                creds_file.write(service_account_json)
+                            gauth = GoogleAuth()
+                            gauth.LoadCredentialsFile("creds.json")
+                            if gauth.credentials is None:
+                                gauth.LocalWebserverAuth()
+                            drive = GoogleDrive(gauth)
+
+                            history_file = drive.CreateFile({"title": log_filename, "parents": [{"id": drive_folder_id}]})
+                            history_file.SetContentFile(log_filename)
+                            history_file.Upload()
+
+                            result_file = drive.CreateFile({"title": result_filename, "parents": [{"id": drive_folder_id}]})
+                            result_file.SetContentFile(output_path)
+                            result_file.Upload()
+
+                            st.success("Pliki zapisane na Twoim Google Drive ✅")
                     else:
                         st.error("Nie znaleziono pliku wynikowego.")
                 except Exception as e:
