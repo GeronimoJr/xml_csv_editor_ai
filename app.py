@@ -17,7 +17,8 @@ model = st.selectbox("Wybierz model LLM (OpenRouter)", [
     "google/gemini-pro"
 ])
 
-api_key = st.text_input("OpenRouter API Key", type="password")
+# --- Wczytaj klucz API z sekcji 'Secrets' w Streamlit Cloud ---
+api_key = st.secrets["OPENROUTER_API_KEY"]
 
 if uploaded_file and instruction and api_key:
     file_contents = uploaded_file.read().decode("utf-8")
