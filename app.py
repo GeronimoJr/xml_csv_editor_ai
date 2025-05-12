@@ -80,10 +80,14 @@ Nie dodawaj żadnych opisów ani komentarzy. Zwróć wyłącznie czysty kod Pyth
             res = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data)
             code = res.json()["choices"][0]["message"]["content"]
 
+            # Czyszczenie kodu z komentarzy i opisów
             code = re.sub(r"```(?:python)?\n", "", code)
             code = code.replace("```", "")
+            code = re.sub(r"^\s*#.*$", "", code, flags=re.MULTILINE)
+            code = re.sub(r"^\s*(print\(.*\)|if __name__ == .__main__.:.*)$", "", code, flags=re.MULTILINE)
+            code = re.sub(r"(?i)^.*(oto kod|przykład|python).*", "", code, flags=re.MULTILINE)
 
-            st.session_state.generated_code = code
+            st.session_state.generated_code = code.strip()
             st.session_state.output_bytes = None
 
     if st.session_state.generated_code:
