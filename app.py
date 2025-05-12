@@ -12,10 +12,7 @@ uploaded_file = st.file_uploader("Wgraj plik XML lub CSV", type=["xml", "csv"])
 instruction = st.text_area("Instrukcja modyfikacji (w języku naturalnym)")
 
 model = st.selectbox("Wybierz model LLM (OpenRouter)", [
-    "openai/gpt-4-turbo",
-    "anthropic/claude-3-opus",
-    "mistralai/mistral-7b-instruct",
-    "google/gemini-pro"
+    "mistralai/mistral-small-3.1-24b-instruct:free"
 ])
 
 # --- Wczytaj klucz API z sekcji 'Secrets' w Streamlit Cloud ---
