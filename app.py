@@ -128,8 +128,12 @@ Nie dodawaj żadnych opisów ani komentarzy. Zwróć wyłącznie czysty kod Pyth
             with tempfile.TemporaryDirectory() as tmpdirname:
                 input_path = os.path.join(tmpdirname, f"input.{file_type}")
                 output_path = os.path.join(tmpdirname, f"output.{file_type}")
-                with open(input_path, "w", encoding="utf-8") as f:
-                    f.write(file_contents)
+                if file_type == "xml":
+                    with open(input_path, "wb") as f:
+                        f.write(raw_bytes)
+                else:
+                    with open(input_path, "w", encoding="utf-8") as f:
+                        f.write(file_contents)
 
                 code = st.session_state.generated_code
                 code = re.sub(r"input_path\s*=.*", "", code)
