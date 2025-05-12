@@ -10,6 +10,8 @@ from pydrive2.auth import GoogleAuth
 from pydrive2.drive import GoogleDrive
 from oauth2client.service_account import ServiceAccountCredentials
 import ast
+import pandas as pd
+import io
 
 st.set_page_config(page_title="Edytor XML/CSV z AI", layout="centered")
 st.title("🔧 AI Edytor plików XML i CSV")
@@ -39,7 +41,21 @@ model = st.selectbox("Wybierz model LLM (OpenRouter)", [
 api_key = st.secrets["OPENROUTER_API_KEY"]
 
 if uploaded_file and instruction and api_key:
-    file_contents = uploaded_file.read().decode("utf-8")
+    raw_bytes = uploaded_file.read()
+    encoding_declared = re.search(br'<\?xml[^>]*encoding=["\']([^"\']+)["\']', raw_bytes)
+    encodings_to_try = [encoding_declared.group(1).decode('ascii')] if encoding_declared else []
+    encodings_to_try += ["utf-8", "iso-8859-2", "windows-1250", "utf-16"]
+
+    for enc in encodings_to_try:
+        try:
+            file_contents = raw_bytes.decode(enc)
+            break
+        except UnicodeDecodeError:
+            continue
+    else:
+        st.error("Nie udało się odczytać pliku – nieznane kodowanie.")
+        st.stop()
+
     file_type = uploaded_file.name.split(".")[-1].lower()
 
     if st.button("Wygeneruj kod Python"):
@@ -89,7 +105,6 @@ Nie dodawaj żadnych opisów ani komentarzy. Zwróć wyłącznie czysty kod Pyth
             code = re.sub(r"^\s*(print\(.*\)|if __name__ == .__main__.:.*)$", "", code, flags=re.MULTILINE)
             code = re.sub(r"(?i)^.*(oto kod|przykład|python).*", "", code, flags=re.MULTILINE)
 
-            # Usuwanie niepoprawnych fragmentów po końcu kodu (bazując na AST)
             def sanitize_code(code):
                 lines = code.strip().splitlines()
                 while lines:
