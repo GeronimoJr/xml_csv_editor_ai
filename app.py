@@ -14,7 +14,7 @@ import pandas as pd
 import io
 
 st.set_page_config(page_title="Edytor XML/CSV z AI", layout="centered")
-st.title("🔧 AI Edytor plików XML i CSV")
+st.title("Edytor AI plików XML i CSV")
 st.markdown("""
 To narzędzie umożliwia modyfikację plików XML i CSV przy użyciu sztucznej inteligencji.
 Prześlij plik i wpisz polecenie w języku naturalnym, np.: _"Dodaj kolumnę Czas dostawy zależnie od dostępności"_.
