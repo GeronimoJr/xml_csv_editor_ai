@@ -11,6 +11,8 @@ st.title("🔧 AI Edytor plików XML i CSV")
 # --- Stan aplikacji ---
 if "generated_code" not in st.session_state:
     st.session_state.generated_code = ""
+if "output_bytes" not in st.session_state:
+    st.session_state.output_bytes = None
 
 uploaded_file = st.file_uploader("Wgraj plik XML lub CSV", type=["xml", "csv"])
 instruction = st.text_area("Instrukcja modyfikacji (w języku naturalnym)")
@@ -73,12 +75,13 @@ Nie dodawaj żadnych opisów ani komentarzy. Zwróć wyłącznie czysty kod Pyth
             code = code.replace("```", "")
 
             st.session_state.generated_code = code
+            st.session_state.output_bytes = None
 
     if st.session_state.generated_code:
         st.subheader("Wygenerowany kod:")
         st.code(st.session_state.generated_code, language="python")
 
-        if st.button("Wykonaj kod i pobierz wynik"):
+        if st.button("Wykonaj kod i zapisz wynik"):
             with tempfile.TemporaryDirectory() as tmpdirname:
                 input_path = os.path.join(tmpdirname, f"input.{file_type}")
                 output_path = os.path.join(tmpdirname, f"output.{file_type}")
@@ -105,15 +108,17 @@ Nie dodawaj żadnych opisów ani komentarzy. Zwróć wyłącznie czysty kod Pyth
 
                     if os.path.exists(output_path):
                         with open(output_path, "rb") as f:
-                            output_bytes = f.read()
-                            st.download_button(
-                                label="📁 Pobierz zmodyfikowany plik",
-                                data=output_bytes,
-                                file_name=f"output.{file_type}",
-                                mime="text/plain"
-                            )
+                            st.session_state.output_bytes = f.read()
                     else:
                         st.error("Nie znaleziono pliku wynikowego.")
                 except Exception as e:
                     st.error("Błąd wykonania kodu:")
                     st.exception(traceback.format_exc())
+
+    if st.session_state.output_bytes:
+        st.download_button(
+            label="📁 Pobierz zmodyfikowany plik",
+            data=st.session_state.output_bytes,
+            file_name=f"output.{file_type}",
+            mime="text/plain"
+        )
