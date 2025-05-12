@@ -28,6 +28,7 @@ uploaded_file = st.file_uploader("Wgraj plik XML lub CSV", type=["xml", "csv"])
 instruction = st.text_area("Instrukcja modyfikacji (w języku naturalnym)")
 
 model = st.selectbox("Wybierz model LLM (OpenRouter)", [
+    "openai/gpt-4o-mini",
     "openai/gpt-4o",
     "openai/gpt-4-turbo",
     "anthropic/claude-3-opus",
