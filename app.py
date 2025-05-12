@@ -9,6 +9,7 @@ from datetime import datetime
 from pydrive2.auth import GoogleAuth
 from pydrive2.drive import GoogleDrive
 from oauth2client.service_account import ServiceAccountCredentials
+import ast
 
 st.set_page_config(page_title="Edytor XML/CSV z AI", layout="centered")
 st.title("🔧 AI Edytor plików XML i CSV")
@@ -86,6 +87,19 @@ Nie dodawaj żadnych opisów ani komentarzy. Zwróć wyłącznie czysty kod Pyth
             code = re.sub(r"^\s*#.*$", "", code, flags=re.MULTILINE)
             code = re.sub(r"^\s*(print\(.*\)|if __name__ == .__main__.:.*)$", "", code, flags=re.MULTILINE)
             code = re.sub(r"(?i)^.*(oto kod|przykład|python).*", "", code, flags=re.MULTILINE)
+
+            # Usuwanie niepoprawnych fragmentów po końcu kodu (bazując na AST)
+            def sanitize_code(code):
+                lines = code.strip().splitlines()
+                while lines:
+                    try:
+                        ast.parse("\n".join(lines))
+                        break
+                    except SyntaxError:
+                        lines.pop()
+                return "\n".join(lines)
+
+            code = sanitize_code(code)
 
             st.session_state.generated_code = code.strip()
             st.session_state.output_bytes = None
