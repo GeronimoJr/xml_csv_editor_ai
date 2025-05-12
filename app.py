@@ -4,6 +4,9 @@ import tempfile
 import os
 import re
 import traceback
+from datetime import datetime
+from pydrive2.auth import GoogleAuth
+from pydrive2.drive import GoogleDrive
 
 st.set_page_config(page_title="Edytor XML/CSV z AI", layout="centered")
 st.title("🔧 AI Edytor plików XML i CSV")
@@ -26,6 +29,7 @@ model = st.selectbox("Wybierz model LLM (OpenRouter)", [
 ])
 
 api_key = st.secrets["OPENROUTER_API_KEY"]
+drive_folder_id = st.secrets.get("GOOGLE_DRIVE_FOLDER_ID")
 
 if uploaded_file and instruction and api_key:
     file_contents = uploaded_file.read().decode("utf-8")
@@ -55,27 +59,18 @@ Wygeneruj kompletny kod, który:
 Nie dodawaj żadnych opisów ani komentarzy. Zwróć wyłącznie czysty kod Python.
         """
 
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-        }
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
         data = {
             "model": model,
             "messages": [
-                {"role": "system", "content": "Jesteś asystentem kodującym w Pythonie."},
-                {"role": "user", "content": prompt}
-            ]
+                {"role": "system", "content": "Jesteś asystentem kodującym."},
+                {"role": "user", "content": prompt}]
         }
-
         with st.spinner("Generowanie kodu Python..."):
             res = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data)
             code = res.json()["choices"][0]["message"]["content"]
-
-            code = re.sub(r"```(?:python)?\n", "", code)
-            code = code.replace("```", "")
-
+            code = re.sub(r"```(?:python)?\n", "", code).replace("```", "")
             st.session_state.generated_code = code
-            st.session_state.output_bytes = None
 
     if st.session_state.generated_code:
         st.subheader("Wygenerowany kod:")
@@ -92,9 +87,6 @@ Nie dodawaj żadnych opisów ani komentarzy. Zwróć wyłącznie czysty kod Pyth
                 code = re.sub(r"input_path\s*=.*", "", code)
                 code = re.sub(r"output_path\s*=.*", "", code)
 
-                st.text("\n[DEBUG] Wykonywany kod:")
-                st.code(code, language="python")
-
                 try:
                     exec_globals = {
                         "__builtins__": __builtins__,
@@ -102,13 +94,31 @@ Nie dodawaj żadnych opisów ani komentarzy. Zwróć wyłącznie czysty kod Pyth
                         "output_path": output_path
                     }
                     exec(code, exec_globals)
-
-                    st.text("[DEBUG] Zawartość katalogu tymczasowego:")
-                    st.text("\n".join(os.listdir(tmpdirname)))
-
                     if os.path.exists(output_path):
                         with open(output_path, "rb") as f:
                             st.session_state.output_bytes = f.read()
+
+                        now = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                        log_filename = f"history_{now}.txt"
+                        result_filename = f"output_{now}.{file_type}"
+
+                        with open(log_filename, "w", encoding="utf-8") as log:
+                            log.write(f"INSTRUCTION:\n{instruction}\n\nCODE:\n{st.session_state.generated_code}")
+
+                        if drive_folder_id:
+                            gauth = GoogleAuth()
+                            gauth.CommandLineAuth()
+                            drive = GoogleDrive(gauth)
+
+                            history_file = drive.CreateFile({"title": log_filename, "parents": [{"id": drive_folder_id}]})
+                            history_file.SetContentFile(log_filename)
+                            history_file.Upload()
+
+                            result_file = drive.CreateFile({"title": result_filename, "parents": [{"id": drive_folder_id}]})
+                            result_file.SetContentFile(output_path)
+                            result_file.Upload()
+
+                            st.success("Pliki zapisane na Twoim Google Drive ✅")
                     else:
                         st.error("Nie znaleziono pliku wynikowego.")
                 except Exception as e:
