@@ -56,7 +56,7 @@ Wygeneruj kompletny kod, który:
 - Modyfikuje dane
 - Zapisuje wynik do output_path
 
-Nie dodawaj żadnych opisów ani komentarzy. Zwróć wyłącznie czysty kod Python.
+Nie przypisuj ponownie input_path ani output_path. Nie dodawaj żadnych opisów ani komentarzy. Zwróć wyłącznie czysty kod Python.
         """
 
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
@@ -84,8 +84,8 @@ Nie dodawaj żadnych opisów ani komentarzy. Zwróć wyłącznie czysty kod Pyth
                     f.write(file_contents)
 
                 code = st.session_state.generated_code
-                code = re.sub(r"input_path\s*=.*", "", code)
-                code = re.sub(r"output_path\s*=.*", "", code)
+                code = re.sub(r"^input_path\s*=.*$", "", code, flags=re.MULTILINE)
+                code = re.sub(r"^output_path\s*=.*$", "", code, flags=re.MULTILINE)
 
                 try:
                     exec_globals = {
