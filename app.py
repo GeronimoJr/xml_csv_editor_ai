@@ -16,6 +16,20 @@ import io
 st.set_page_config(page_title="Edytor XML/CSV z AI", layout="centered")
 st.title("🔧 AI Edytor plików XML i CSV")
 
+# --- Uwierzytelnianie ---
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+
+if not st.session_state.authenticated:
+    user = st.text_input("Login")
+    password = st.text_input("Hasło", type="password")
+    if st.button("Zaloguj"):
+        if user == st.secrets.get("APP_USER") and password == st.secrets.get("APP_PASSWORD"):
+            st.session_state.authenticated = True
+        else:
+            st.error("Nieprawidłowy login lub hasło")
+    st.stop()
+
 # --- Stan aplikacji ---
 if "generated_code" not in st.session_state:
     st.session_state.generated_code = ""
@@ -98,12 +112,11 @@ Nie dodawaj żadnych opisów ani komentarzy. Zwróć wyłącznie czysty kod Pyth
             res = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data)
             code = res.json()["choices"][0]["message"]["content"]
 
-            # Czyszczenie kodu z komentarzy i opisów
             code = re.sub(r"```(?:python)?\n", "", code)
             code = code.replace("```", "")
             code = re.sub(r"^\s*#.*$", "", code, flags=re.MULTILINE)
             code = re.sub(r"^\s*(print\(.*\)|if __name__ == .__main__.:.*)$", "", code, flags=re.MULTILINE)
-            code = re.sub(r"(?i)^.*(oto kod|przykład|python).*", "", code, flags=re.MULTILINE)
+            code = re.sub(r"(?i)^.*(oto kod|przykład|python).*$", "", code, flags=re.MULTILINE)
 
             def sanitize_code(code):
                 lines = code.strip().splitlines()
