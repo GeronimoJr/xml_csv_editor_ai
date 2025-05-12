@@ -8,6 +8,10 @@ import traceback
 st.set_page_config(page_title="Edytor XML/CSV z AI", layout="centered")
 st.title("🔧 AI Edytor plików XML i CSV")
 
+# --- Stan aplikacji ---
+if "generated_code" not in st.session_state:
+    st.session_state.generated_code = ""
+
 uploaded_file = st.file_uploader("Wgraj plik XML lub CSV", type=["xml", "csv"])
 instruction = st.text_area("Instrukcja modyfikacji (w języku naturalnym)")
 
@@ -68,45 +72,48 @@ Nie dodawaj żadnych opisów ani komentarzy. Zwróć wyłącznie czysty kod Pyth
             code = re.sub(r"```(?:python)?\n", "", code)
             code = code.replace("```", "")
 
-            st.subheader("Wygenerowany kod:")
-            st.code(code, language="python")
+            st.session_state.generated_code = code
 
-            if st.button("Wykonaj kod i pobierz wynik"):
-                with tempfile.TemporaryDirectory() as tmpdirname:
-                    input_path = os.path.join(tmpdirname, f"input.{file_type}")
-                    output_path = os.path.join(tmpdirname, f"output.{file_type}")
-                    with open(input_path, "w", encoding="utf-8") as f:
-                        f.write(file_contents)
+    if st.session_state.generated_code:
+        st.subheader("Wygenerowany kod:")
+        st.code(st.session_state.generated_code, language="python")
 
-                    # Usuń ewentualne nadpisania input_path/output_path
-                    code = re.sub(r"input_path\s*=.*", "", code)
-                    code = re.sub(r"output_path\s*=.*", "", code)
+        if st.button("Wykonaj kod i pobierz wynik"):
+            with tempfile.TemporaryDirectory() as tmpdirname:
+                input_path = os.path.join(tmpdirname, f"input.{file_type}")
+                output_path = os.path.join(tmpdirname, f"output.{file_type}")
+                with open(input_path, "w", encoding="utf-8") as f:
+                    f.write(file_contents)
 
-                    st.text("\n[DEBUG] Wykonywany kod:")
-                    st.code(code, language="python")
+                code = st.session_state.generated_code
+                code = re.sub(r"input_path\s*=.*", "", code)
+                code = re.sub(r"output_path\s*=.*", "", code)
 
-                    try:
-                        exec_globals = {
-                            "__builtins__": __builtins__,
-                            "input_path": input_path,
-                            "output_path": output_path
-                        }
-                        exec(code, exec_globals)
+                st.text("\n[DEBUG] Wykonywany kod:")
+                st.code(code, language="python")
 
-                        st.text("[DEBUG] Zawartość katalogu tymczasowego:")
-                        st.text("\n".join(os.listdir(tmpdirname)))
+                try:
+                    exec_globals = {
+                        "__builtins__": __builtins__,
+                        "input_path": input_path,
+                        "output_path": output_path
+                    }
+                    exec(code, exec_globals)
 
-                        if os.path.exists(output_path):
-                            with open(output_path, "rb") as f:
-                                output_bytes = f.read()
-                                st.download_button(
-                                    label="📁 Pobierz zmodyfikowany plik",
-                                    data=output_bytes,
-                                    file_name=f"output.{file_type}",
-                                    mime="text/plain"
-                                )
-                        else:
-                            st.error("Nie znaleziono pliku wynikowego.")
-                    except Exception as e:
-                        st.error("Błąd wykonania kodu:")
-                        st.exception(traceback.format_exc())
+                    st.text("[DEBUG] Zawartość katalogu tymczasowego:")
+                    st.text("\n".join(os.listdir(tmpdirname)))
+
+                    if os.path.exists(output_path):
+                        with open(output_path, "rb") as f:
+                            output_bytes = f.read()
+                            st.download_button(
+                                label="📁 Pobierz zmodyfikowany plik",
+                                data=output_bytes,
+                                file_name=f"output.{file_type}",
+                                mime="text/plain"
+                            )
+                    else:
+                        st.error("Nie znaleziono pliku wynikowego.")
+                except Exception as e:
+                    st.error("Błąd wykonania kodu:")
+                    st.exception(traceback.format_exc())
