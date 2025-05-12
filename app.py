@@ -77,6 +77,10 @@ Nie dodawaj żadnych opisów ani komentarzy. Zwróć wyłącznie czysty kod Pyth
                     with open(input_path, "w", encoding="utf-8") as f:
                         f.write(file_contents)
 
+                    # Usuń ewentualne nadpisania input_path/output_path
+                    code = re.sub(r"input_path\s*=.*", "", code)
+                    code = re.sub(r"output_path\s*=.*", "", code)
+
                     try:
                         exec(code, {"input_path": input_path, "output_path": output_path})
                         if os.path.exists(output_path):
