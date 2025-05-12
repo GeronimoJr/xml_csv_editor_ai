@@ -4,9 +4,11 @@ import tempfile
 import os
 import re
 import traceback
+import json
 from datetime import datetime
 from pydrive2.auth import GoogleAuth
 from pydrive2.drive import GoogleDrive
+from oauth2client.service_account import ServiceAccountCredentials
 
 st.set_page_config(page_title="Edytor XML/CSV z AI", layout="centered")
 st.title("🔧 AI Edytor plików XML i CSV")
@@ -125,12 +127,11 @@ Nie dodawaj żadnych opisów ani komentarzy. Zwróć wyłącznie czysty kod Pyth
                             log.write(f"INSTRUCTION:\n{instruction}\n\nCODE:\n{st.session_state.generated_code}")
 
                         if drive_folder_id and service_account_json:
-                            with open("creds.json", "w") as creds_file:
-                                creds_file.write(service_account_json)
+                            creds_dict = json.loads(service_account_json)
+                            scope = ["https://www.googleapis.com/auth/drive"]
+                            credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
                             gauth = GoogleAuth()
-                            gauth.LoadCredentialsFile("creds.json")
-                            if gauth.credentials is None:
-                                gauth.LocalWebserverAuth()
+                            gauth.credentials = credentials
                             drive = GoogleDrive(gauth)
 
                             history_file = drive.CreateFile({"title": log_filename, "parents": [{"id": drive_folder_id}]})
