@@ -92,11 +92,16 @@ Nie dodawaj żadnych opisów ani komentarzy. Zwróć wyłącznie czysty kod Pyth
                             "output_path": output_path
                         }
                         exec(code, exec_globals)
+
+                        st.text("[DEBUG] Zawartość katalogu tymczasowego:")
+                        st.text("\n".join(os.listdir(tmpdirname)))
+
                         if os.path.exists(output_path):
                             with open(output_path, "rb") as f:
+                                output_bytes = f.read()
                                 st.download_button(
                                     label="📁 Pobierz zmodyfikowany plik",
-                                    data=f,
+                                    data=output_bytes,
                                     file_name=f"output.{file_type}",
                                     mime="text/plain"
                                 )
