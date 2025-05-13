@@ -92,7 +92,7 @@ if uploaded_file:
     raw_bytes = uploaded_file.read()
     try:
         if file_type == "xml":
-            encoding_declared = re.search(br'<\?xml[^>]*encoding=["\']([^"\']+)["\']', raw_bytes)
+            encoding_declared = re.search(br'<\?xml[^>]*encoding=["\']([^"\']+)['\"]', raw_bytes)
             encodings_to_try = [encoding_declared.group(1).decode('ascii')] if encoding_declared else []
             encodings_to_try += ["utf-8", "iso-8859-2", "windows-1250", "utf-16"]
             for enc in encodings_to_try:
@@ -122,24 +122,22 @@ if uploaded_file:
             cell_indices = []
             for row_idx, row in df.iterrows():
                 for col_idx, cell in enumerate(row):
-                    lines.append(str(cell))
-                    cell_indices.append((row_idx, df.columns[col_idx]))
+                    lines.append(((row_idx, df.columns[col_idx]), str(cell)))
         elif file_type in ["xls", "xlsx"]:
             df = pd.read_excel(io.BytesIO(raw_bytes))
             lines = []
             cell_indices = []
             for row_idx, row in df.iterrows():
                 for col_idx, cell in enumerate(row):
-                    lines.append(str(cell))
-                    cell_indices.append((row_idx, df.columns[col_idx]))
+                    lines.append(((row_idx, df.columns[col_idx]), str(cell)))
         elif file_type in ["doc", "docx"]:
             doc = Document(io.BytesIO(raw_bytes))
-            lines = [p.text for p in doc.paragraphs if p.text.strip()]
+            lines = [(None, p.text) for p in doc.paragraphs if p.text.strip()]
             for table in doc.tables:
                 for row in table.rows:
                     for cell in row.cells:
                         if cell.text.strip():
-                            lines.append(cell.text.strip())
+                            lines.append((None, cell.text.strip()))
         else:
             st.error("Nieobsługiwany typ pliku.")
             st.stop()
@@ -147,12 +145,12 @@ if uploaded_file:
         enc = tiktoken.encoding_for_model("gpt-4")
         chunk_size = 10000
         chunks, current_chunk, current_tokens = [], [], 0
-        for i, line in enumerate(lines):
+        for i, (meta, line) in enumerate(lines):
             token_len = len(enc.encode(line))
             if current_tokens + token_len > chunk_size:
                 chunks.append(current_chunk)
                 current_chunk, current_tokens = [], 0
-            current_chunk.append((i, line))
+            current_chunk.append((meta, line))
             current_tokens += token_len
         if current_chunk:
             chunks.append(current_chunk)
@@ -170,7 +168,7 @@ if uploaded_file:
         st.info(f"Szacunkowy koszt tłumaczenia: ~${cost_total:.4f} USD")
 
         if st.button("Przetłumacz plik"):
-            translated_pairs = []
+            translated_map = {}
             for i, chunk in enumerate(chunks):
                 with st.spinner(f"Tłumaczenie części {i + 1} z {len(chunks)}..."):
                     content = "\n".join(l for _, l in chunk)
@@ -182,37 +180,32 @@ if uploaded_file:
                             {"role": "user", "content": prompt}
                         ]})
                     result = res.json()["choices"][0]["message"]["content"].splitlines()
-                    for (idx, _), translated in zip(chunk, result):
-                        translated_pairs.append((idx, translated.strip()))
-            translated_pairs.sort()
+                    for (meta, _), translated in zip(chunk, result):
+                        translated_map[meta] = translated.strip()
 
             with tempfile.TemporaryDirectory() as tmpdir:
                 output_path = os.path.join(tmpdir, f"output.{file_type}")
                 if file_type == "xml":
-                    translated_map = dict(translated_pairs)
                     insert_translations_into_xml(root, translated_map)
                     tree.write(output_path, encoding="utf-8", xml_declaration=True)
                 elif file_type in ["csv", "xls", "xlsx"]:
                     translated_df = df.copy()
-                    for (idx, (row_idx, col_name)) in enumerate(cell_indices):
-                        translated_df.at[row_idx, col_name] = translated_pairs[idx][1]
+                    for (row_idx, col_name), text in translated_map.items():
+                        translated_df.at[row_idx, col_name] = text
                     if file_type == "csv":
                         translated_df.to_csv(output_path, index=False)
                     else:
                         translated_df.to_excel(output_path, index=False)
                 elif file_type in ["doc", "docx"]:
                     new_doc = Document()
-                    index = 0
                     for p in doc.paragraphs:
                         if p.text.strip():
-                            new_doc.add_paragraph(translated_pairs[index][1])
-                            index += 1
+                            new_doc.add_paragraph(translated_map.pop(None))
                     for table in doc.tables:
                         for row in table.rows:
                             for cell in row.cells:
                                 if cell.text.strip():
-                                    cell.text = translated_pairs[index][1]
-                                    index += 1
+                                    cell.text = translated_map.pop(None)
                     new_doc.save(output_path)
 
                 with open(output_path, "rb") as f:
