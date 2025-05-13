@@ -339,7 +339,6 @@ def main():
             "openai/gpt-4-turbo",
             "anthropic/claude-3.5-haiku",
             "anthropic/claude-3.7-sonnet",
-            "anthropic/claude-3-opus",
             "google/gemini-2.5-pro-preview"
         ])
         
