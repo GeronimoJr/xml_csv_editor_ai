@@ -27,7 +27,7 @@ def authenticate_user():
         if st.button("Zaloguj"):
             if user == st.secrets.get("APP_USER") and password == st.secrets.get("APP_PASSWORD"):
                 st.session_state.authenticated = True
-                st.experimental_rerun()
+                st.rerun()  # Używamy st.rerun() zamiast przestarzałego st.experimental_rerun()
             else:
                 st.error("Nieprawidłowy login lub hasło")
         st.stop()
@@ -77,7 +77,6 @@ def read_file_content(uploaded_file):
         # Jeśli żadne kodowanie nie działa, spróbuj wczytać jako binarny
         if file_type == "csv":
             try:
-                # Używając pandas do wykrycia separatora i kodowania
                 buffer = io.BytesIO(raw_bytes)
                 df = pd.read_csv(buffer, sep=None, engine='python')
                 file_contents = df.to_csv(index=False)
@@ -260,6 +259,15 @@ def save_to_google_drive(output_bytes, file_info, instruction, generated_code):
         return False, f"Błąd podczas zapisu na Google Drive: {str(e)}"
 
 
+def reset_app_state():
+    """Resetuje stan aplikacji do ponownej edycji"""
+    for key in list(st.session_state.keys()):
+        if key != "authenticated":
+            del st.session_state[key]
+    initialize_session_state()
+    st.rerun()
+
+
 def main():
     """Główna funkcja aplikacji"""
     # Ustawienia strony
@@ -271,7 +279,7 @@ def main():
     # Inicjalizacja stanu sesji
     initialize_session_state()
     
-    # Interfejs użytkownika - prosty layout bez sidebaru i złożonych komponentów
+    # Interfejs użytkownika - prosty layout
     st.title("Edytor AI plików XML i CSV")
     
     # Zakładki
@@ -346,26 +354,8 @@ def main():
                     with st.expander("Szczegóły błędu", expanded=False):
                         st.code(result["traceback"])
         
-        # Wyświetl wynik i przycisk pobierania, jeśli jest wygenerowany plik
+        # Przycisk pobierania jeśli jest wygenerowany plik (bez podglądu)
         if st.session_state.output_bytes:
-            st.subheader("Wynik przetwarzania:")
-            
-            try:
-                # Jeśli to XML, wyświetl fragment
-                if st.session_state.file_info["type"] == "xml":
-                    xml_content = st.session_state.output_bytes.decode("utf-8", errors="replace")
-                    st.code(xml_content[:1000] + ("..." if len(xml_content) > 1000 else ""), language="xml")
-                # Jeśli to CSV, wyświetl jako tabelę
-                elif st.session_state.file_info["type"] == "csv":
-                    csv_content = st.session_state.output_bytes.decode("utf-8", errors="replace")
-                    df = pd.read_csv(io.StringIO(csv_content))
-                    st.dataframe(df.head(10))
-                    if len(df) > 10:
-                        st.info(f"Wyświetlono 10 z {len(df)} wierszy")
-            except Exception as e:
-                st.warning(f"Nie można wyświetlić podglądu: {str(e)}")
-            
-            # Przycisk pobierania
             file_type = st.session_state.file_info["type"]
             original_name = st.session_state.file_info["name"]
             base_name = os.path.splitext(original_name)[0]
@@ -376,6 +366,10 @@ def main():
                 file_name=f"{base_name}_processed.{file_type}",
                 mime="text/plain"
             )
+            
+            # Dodanie przycisku "Ponowna edycja" na końcu
+            if st.button("Ponowna edycja"):
+                reset_app_state()
     
     with tab2:
         st.markdown("""
