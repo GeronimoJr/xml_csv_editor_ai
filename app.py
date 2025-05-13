@@ -212,11 +212,8 @@ def save_to_google_drive(output_bytes, file_info, instruction, generated_code):
     """Zapisuje wyniki do Google Drive"""
     try:
         # Sprawdź, czy mamy wszystkie potrzebne dane konfiguracyjne
-        if "GOOGLE_DRIVE_FOLDER_ID" not in st.secrets or "GOOGLE_DRIVE_CREDENTIALS_JSON" not in st.secrets:
-            return False, "Brak konfiguracji Google Drive w secrets."
-            
-        drive_folder_id = st.secrets["GOOGLE_DRIVE_FOLDER_ID"]
-        credentials_json = st.secrets["GOOGLE_DRIVE_CREDENTIALS_JSON"]
+        drive_folder_id = st.secrets.get("GOOGLE_DRIVE_FOLDER_ID")
+        credentials_json = st.secrets.get("GOOGLE_DRIVE_CREDENTIALS_JSON")
         
         if not drive_folder_id or not credentials_json:
             return False, "Brak konfiguracji Google Drive."
@@ -225,75 +222,71 @@ def save_to_google_drive(output_bytes, file_info, instruction, generated_code):
         log_filename = f"history_{now}.txt"
         result_filename = f"output_{now}.{file_info['type']}"
         
-        # Zapisz pliki tymczasowo
-        with tempfile.NamedTemporaryFile(suffix=f".{file_info['type']}", delete=False) as temp_result:
-            temp_result.write(output_bytes)
-            temp_result_path = temp_result.name
+        # Utwórz tymczasowy katalog zamiast pojedynczych plików
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            # Zapisz pliki tymczasowo w katalogu tymczasowym
+            temp_result_path = os.path.join(tmpdirname, f"output.{file_info['type']}")
+            temp_log_path = os.path.join(tmpdirname, "log.txt")
             
-        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as temp_log:
+            with open(temp_result_path, "wb") as f:
+                f.write(output_bytes)
+                
             log_content = f"INSTRUCTION:\n{instruction}\n\nCODE:\n{generated_code}"
-            temp_log.write(log_content.encode('utf-8'))
-            temp_log_path = temp_log.name
+            with open(temp_log_path, "w", encoding='utf-8') as f:
+                f.write(log_content)
             
-        # Uwierzytelnianie Google Drive
-        with st.spinner("Zapisuję na Google Drive..."):
-            # Przygotuj poświadczenia z JSON
-            if isinstance(credentials_json, str):
-                creds_dict = json.loads(credentials_json)
-            else:
-                creds_dict = credentials_json
+            # Uwierzytelnianie Google Drive
+            with st.spinner("Zapisuję na Google Drive..."):
+                # Przygotuj poświadczenia z JSON
+                if isinstance(credentials_json, str):
+                    try:
+                        creds_dict = json.loads(credentials_json)
+                    except json.JSONDecodeError:
+                        st.error("Błąd dekodowania JSON z credentials")
+                        return False, "Błąd dekodowania JSON z credentials"
+                else:
+                    creds_dict = credentials_json
+                    
+                scope = ["https://www.googleapis.com/auth/drive"]
+                credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
                 
-            scope = ["https://www.googleapis.com/auth/drive"]
-            credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-            
-            # Konfiguruj GoogleAuth
-            gauth = GoogleAuth()
-            gauth.credentials = credentials
-            
-            # Utwórz obiekt GoogleDrive
-            drive = GoogleDrive(gauth)
-            
-            # Sprawdź, czy folder istnieje
-            folder_exists = False
-            query = f"'{drive_folder_id}' in parents and trashed=false"
-            file_list = drive.ListFile({'q': query}).GetList()
-            if file_list:
-                folder_exists = True
-            
-            if not folder_exists:
-                return False, f"Folder docelowy o ID {drive_folder_id} nie istnieje lub nie ma do niego dostępu."
-            
-            # Upload plików
-            try:
-                # Historia operacji
-                history_file = drive.CreateFile({
-                    "title": log_filename, 
-                    "parents": [{"id": drive_folder_id}],
-                    "mimeType": "text/plain"
-                })
-                history_file.SetContentFile(temp_log_path)
-                history_file.Upload()
+                # Konfiguruj GoogleAuth
+                gauth = GoogleAuth()
+                gauth.credentials = credentials
                 
-                # Plik wynikowy
-                result_file = drive.CreateFile({
-                    "title": result_filename, 
-                    "parents": [{"id": drive_folder_id}],
-                    "mimeType": f"application/{file_info['type']}"
-                })
-                result_file.SetContentFile(temp_result_path)
-                result_file.Upload()
+                # Utwórz obiekt GoogleDrive
+                drive = GoogleDrive(gauth)
                 
-                # Czyszczenie
-                os.unlink(temp_log_path)
-                os.unlink(temp_result_path)
+                try:
+                    # Historia operacji
+                    history_file = drive.CreateFile({
+                        "title": log_filename, 
+                        "parents": [{"id": drive_folder_id}],
+                        "mimeType": "text/plain"
+                    })
+                    history_file.SetContentFile(temp_log_path)
+                    history_file.Upload()
+                    
+                    # Plik wynikowy
+                    result_file = drive.CreateFile({
+                        "title": result_filename, 
+                        "parents": [{"id": drive_folder_id}],
+                        "mimeType": f"application/{file_info['type']}"
+                    })
+                    result_file.SetContentFile(temp_result_path)
+                    result_file.Upload()
+                    
+                    st.success("Pliki zostały zapisane na Google Drive.")
+                    return True, "Pliki zostały zapisane na Google Drive."
+                    
+                except Exception as upload_error:
+                    st.error(f"Błąd podczas wysyłania plików: {str(upload_error)}")
+                    return False, f"Błąd podczas wysyłania plików: {str(upload_error)}"
                 
-                return True, "Pliki zostały zapisane na Google Drive."
-                
-            except Exception as upload_error:
-                return False, f"Błąd podczas wysyłania plików: {str(upload_error)}"
-            
     except Exception as e:
+        st.error(f"Błąd podczas zapisu na Google Drive: {str(e)}")
         return False, f"Błąd podczas zapisu na Google Drive: {str(e)}"
+
 
 
 def reset_app_state():
