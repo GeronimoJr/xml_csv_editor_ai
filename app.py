@@ -211,10 +211,14 @@ def execute_code_safely(generated_code, file_info):
 def save_to_google_drive(output_bytes, file_info, instruction, generated_code):
     """Zapisuje wyniki do Google Drive"""
     try:
-        drive_folder_id = st.secrets.get("GOOGLE_DRIVE_FOLDER_ID")
-        service_account_json = st.secrets.get("GOOGLE_DRIVE_CREDENTIALS_JSON")
+        # Sprawdź, czy mamy wszystkie potrzebne dane konfiguracyjne
+        if "GOOGLE_DRIVE_FOLDER_ID" not in st.secrets or "GOOGLE_DRIVE_CREDENTIALS_JSON" not in st.secrets:
+            return False, "Brak konfiguracji Google Drive w secrets."
+            
+        drive_folder_id = st.secrets["GOOGLE_DRIVE_FOLDER_ID"]
+        credentials_json = st.secrets["GOOGLE_DRIVE_CREDENTIALS_JSON"]
         
-        if not drive_folder_id or not service_account_json:
+        if not drive_folder_id or not credentials_json:
             return False, "Brak konfiguracji Google Drive."
             
         now = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -233,27 +237,60 @@ def save_to_google_drive(output_bytes, file_info, instruction, generated_code):
             
         # Uwierzytelnianie Google Drive
         with st.spinner("Zapisuję na Google Drive..."):
-            creds_dict = json.loads(service_account_json)
+            # Przygotuj poświadczenia z JSON
+            if isinstance(credentials_json, str):
+                creds_dict = json.loads(credentials_json)
+            else:
+                creds_dict = credentials_json
+                
             scope = ["https://www.googleapis.com/auth/drive"]
             credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+            
+            # Konfiguruj GoogleAuth
             gauth = GoogleAuth()
             gauth.credentials = credentials
+            
+            # Utwórz obiekt GoogleDrive
             drive = GoogleDrive(gauth)
             
+            # Sprawdź, czy folder istnieje
+            folder_exists = False
+            query = f"'{drive_folder_id}' in parents and trashed=false"
+            file_list = drive.ListFile({'q': query}).GetList()
+            if file_list:
+                folder_exists = True
+            
+            if not folder_exists:
+                return False, f"Folder docelowy o ID {drive_folder_id} nie istnieje lub nie ma do niego dostępu."
+            
             # Upload plików
-            history_file = drive.CreateFile({"title": log_filename, "parents": [{"id": drive_folder_id}]})
-            history_file.SetContentFile(temp_log_path)
-            history_file.Upload()
-            
-            result_file = drive.CreateFile({"title": result_filename, "parents": [{"id": drive_folder_id}]})
-            result_file.SetContentFile(temp_result_path)
-            result_file.Upload()
-            
-            # Czyszczenie
-            os.unlink(temp_log_path)
-            os.unlink(temp_result_path)
-            
-            return True, "Pliki zostały zapisane na Google Drive."
+            try:
+                # Historia operacji
+                history_file = drive.CreateFile({
+                    "title": log_filename, 
+                    "parents": [{"id": drive_folder_id}],
+                    "mimeType": "text/plain"
+                })
+                history_file.SetContentFile(temp_log_path)
+                history_file.Upload()
+                
+                # Plik wynikowy
+                result_file = drive.CreateFile({
+                    "title": result_filename, 
+                    "parents": [{"id": drive_folder_id}],
+                    "mimeType": f"application/{file_info['type']}"
+                })
+                result_file.SetContentFile(temp_result_path)
+                result_file.Upload()
+                
+                # Czyszczenie
+                os.unlink(temp_log_path)
+                os.unlink(temp_result_path)
+                
+                return True, "Pliki zostały zapisane na Google Drive."
+                
+            except Exception as upload_error:
+                return False, f"Błąd podczas wysyłania plików: {str(upload_error)}"
             
     except Exception as e:
         return False, f"Błąd podczas zapisu na Google Drive: {str(e)}"
@@ -336,25 +373,30 @@ def main():
                 
                 if result["success"]:
                     st.session_state.output_bytes = result["output"]
+                    st.success("Dane zostały pomyślnie przetworzone!")
                     
                     # Zapisz na Google Drive
-                    success, message = save_to_google_drive(
-                        st.session_state.output_bytes,
-                        st.session_state.file_info,
-                        instruction,
-                        st.session_state.generated_code
-                    )
-                    
-                    if success:
-                        st.success(f"Dane zostały pomyślnie przetworzone! {message}")
-                    else:
-                        st.warning(f"Dane przetworzone, ale {message}")
+                    try:
+                        success, message = save_to_google_drive(
+                            st.session_state.output_bytes,
+                            st.session_state.file_info,
+                            instruction,
+                            st.session_state.generated_code
+                        )
+                        
+                        if success:
+                            st.success(f"✅ {message}")
+                        else:
+                            st.warning(f"⚠️ {message}")
+                            
+                    except Exception as e:
+                        st.error(f"Błąd podczas zapisywania na Google Drive: {str(e)}")
                 else:
                     st.error(f"Błąd: {result['error']}")
                     with st.expander("Szczegóły błędu", expanded=False):
                         st.code(result["traceback"])
         
-        # Przycisk pobierania jeśli jest wygenerowany plik (bez podglądu)
+        # Przycisk pobierania jeśli jest wygenerowany plik
         if st.session_state.output_bytes:
             file_type = st.session_state.file_info["type"]
             original_name = st.session_state.file_info["name"]
