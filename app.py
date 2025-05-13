@@ -12,29 +12,25 @@ from oauth2client.service_account import ServiceAccountCredentials
 import ast
 import pandas as pd
 import io
-import time
 
 # --- Funkcje pomocnicze ---
 
 def authenticate_user():
-    """Uwierzytelnianie użytkownika z wykorzystaniem formularza"""
+    """Uwierzytelnianie użytkownika"""
     if "authenticated" not in st.session_state:
         st.session_state.authenticated = False
     
     if not st.session_state.authenticated:
-        with st.form("login_form"):
-            st.title("Edytor AI plików XML i CSV - Logowanie")
-            user = st.text_input("Login")
-            password = st.text_input("Hasło", type="password")
-            submit = st.form_submit_button("Zaloguj")
-            
-            if submit:
-                if user == st.secrets.get("APP_USER") and password == st.secrets.get("APP_PASSWORD"):
-                    st.session_state.authenticated = True
-                    st.experimental_rerun()
-                else:
-                    st.error("Nieprawidłowy login lub hasło")
-        return False
+        st.title("Edytor AI plików XML i CSV - Logowanie")
+        user = st.text_input("Login")
+        password = st.text_input("Hasło", type="password")
+        if st.button("Zaloguj"):
+            if user == st.secrets.get("APP_USER") and password == st.secrets.get("APP_PASSWORD"):
+                st.session_state.authenticated = True
+                st.experimental_rerun()
+            else:
+                st.error("Nieprawidłowy login lub hasło")
+        st.stop()
     return True
 
 
@@ -46,12 +42,6 @@ def initialize_session_state():
         st.session_state.output_bytes = None
     if "file_info" not in st.session_state:
         st.session_state.file_info = None
-    if "history" not in st.session_state:
-        st.session_state.history = []
-    if "error_message" not in st.session_state:
-        st.session_state.error_message = None
-    if "success_message" not in st.session_state:
-        st.session_state.success_message = None
 
 
 def read_file_content(uploaded_file):
@@ -105,7 +95,7 @@ def read_file_content(uploaded_file):
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def generate_ai_code(file_contents, file_type, instruction, model, api_key):
-    """Generuje kod z użyciem API z cachowaniem wyników dla identycznych zapytań"""
+    """Generuje kod z użyciem API z cachowaniem wyników"""
     prompt = f"""
 Jesteś pomocnym asystentem, który generuje kod Python do modyfikacji plików typu {file_type.upper()}.
 Użytkownik przesłał plik wejściowy. Kod powinien:
@@ -145,7 +135,7 @@ Nie dodawaj żadnych opisów ani komentarzy. Zwróć wyłącznie czysty kod Pyth
         with st.spinner("Generowanie kodu Python..."):
             res = requests.post("https://openrouter.ai/api/v1/chat/completions", 
                                 headers=headers, json=data, timeout=60)
-            res.raise_for_status()  # Zgłaszaj błędy HTTP
+            res.raise_for_status()
             
             code = res.json()["choices"][0]["message"]["content"]
             # Czyszczenie kodu
@@ -163,25 +153,21 @@ Nie dodawaj żadnych opisów ani komentarzy. Zwróć wyłącznie czysty kod Pyth
 
 def clean_and_validate_code(code):
     """Czyści i waliduje wygenerowany kod"""
-    try:
-        # Usuwaj puste linie i whitespace
-        code = "\n".join([line for line in code.splitlines() if line.strip()])
-        
-        # Upewnij się, że kod jest poprawny składniowo
-        def sanitize_code(code):
-            lines = code.strip().splitlines()
-            while lines:
-                try:
-                    ast.parse("\n".join(lines))
-                    break
-                except SyntaxError:
-                    lines.pop()
-            return "\n".join(lines)
+    # Usuwaj puste linie i whitespace
+    code = "\n".join([line for line in code.splitlines() if line.strip()])
+    
+    # Upewnij się, że kod jest poprawny składniowo
+    def sanitize_code(code):
+        lines = code.strip().splitlines()
+        while lines:
+            try:
+                ast.parse("\n".join(lines))
+                break
+            except SyntaxError:
+                lines.pop()
+        return "\n".join(lines)
 
-        return sanitize_code(code).strip()
-        
-    except Exception as e:
-        return f"Błąd walidacji kodu: {str(e)}"
+    return sanitize_code(code).strip()
 
 
 def execute_code_safely(generated_code, file_info):
@@ -201,7 +187,7 @@ def execute_code_safely(generated_code, file_info):
             code = re.sub(r"output_path\s*=.*", "", code)
             
             try:
-                # Środowisko wykonania z ograniczonymi prawami
+                # Środowisko wykonania
                 exec_globals = {
                     "__builtins__": __builtins__,
                     "pd": pd,
@@ -210,25 +196,11 @@ def execute_code_safely(generated_code, file_info):
                     "output_path": output_path
                 }
                 
-                # Dodaj time limit
-                start_time = time.time()
                 exec(code, exec_globals)
-                execution_time = time.time() - start_time
-                
-                st.info(f"Czas wykonania: {execution_time:.2f} s")
                 
                 if os.path.exists(output_path):
                     with open(output_path, "rb") as f:
                         output_bytes = f.read()
-                    
-                    # Zapisz do historii
-                    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    st.session_state.history.append({
-                        "date": now,
-                        "operation": file_info.get("name", "") + " - " + file_info.get("type", ""),
-                        "instruction": file_info.get("instruction", "")
-                    })
-                    
                     return {"success": True, "output": output_bytes}
                 else:
                     return {"success": False, "error": "Nie wygenerowano pliku wynikowego."}
@@ -238,7 +210,7 @@ def execute_code_safely(generated_code, file_info):
 
 
 def save_to_google_drive(output_bytes, file_info, instruction, generated_code):
-    """Zapisuje wyniki do Google Drive z lepszą obsługą błędów"""
+    """Zapisuje wyniki do Google Drive"""
     try:
         drive_folder_id = st.secrets.get("GOOGLE_DRIVE_FOLDER_ID")
         service_account_json = st.secrets.get("GOOGLE_DRIVE_CREDENTIALS_JSON")
@@ -288,16 +260,42 @@ def save_to_google_drive(output_bytes, file_info, instruction, generated_code):
         return False, f"Błąd podczas zapisu na Google Drive: {str(e)}"
 
 
-def create_ui():
-    """Tworzy interfejs użytkownika aplikacji"""
-    st.set_page_config(page_title="Edytor XML/CSV z AI", layout="wide")
+def main():
+    """Główna funkcja aplikacji"""
+    # Ustawienia strony
+    st.set_page_config(page_title="Edytor XML/CSV z AI", layout="centered")
     
-    with st.sidebar:
-        st.image("https://via.placeholder.com/150x80?text=AI+Editor", width=150)
-        st.markdown("### Ustawienia")
+    # Uwierzytelnianie
+    authenticate_user()
+    
+    # Inicjalizacja stanu sesji
+    initialize_session_state()
+    
+    # Interfejs użytkownika - prosty layout bez sidebaru i złożonych komponentów
+    st.title("Edytor AI plików XML i CSV")
+    
+    # Zakładki
+    tab1, tab2 = st.tabs(["Edycja pliku", "Pomoc"])
+    
+    with tab1:
+        st.markdown("""
+        To narzędzie umożliwia modyfikację plików XML i CSV przy użyciu sztucznej inteligencji.
+        Prześlij plik i wpisz polecenie w języku naturalnym, np.: _"Dodaj kolumnę Czas dostawy zależnie od dostępności"_.
+        """)
         
-        # Wybór modelu w sidepanel
-        model = st.selectbox("Model LLM (OpenRouter)", [
+        uploaded_file = st.file_uploader("Wgraj plik XML lub CSV", type=["xml", "csv"])
+        
+        if uploaded_file:
+            file_info, error = read_file_content(uploaded_file)
+            if error:
+                st.error(error)
+            else:
+                st.success(f"Wczytano plik: {file_info['name']} ({file_info['type'].upper()}, {file_info['encoding']})")
+                st.session_state.file_info = file_info
+        
+        instruction = st.text_area("Instrukcja modyfikacji (w języku naturalnym)")
+        
+        model = st.selectbox("Wybierz model LLM (OpenRouter)", [
             "openai/gpt-4o-mini",
             "openai/gpt-4o",
             "openai/gpt-4-turbo",
@@ -306,118 +304,49 @@ def create_ui():
             "google/gemini-pro"
         ])
         
-        # Dodatkowe opcje
-        with st.expander("Zaawansowane opcje"):
-            encoding_option = st.radio("Wybór kodowania", ["auto", "manual"])
-            if encoding_option == "manual":
-                manual_encoding = st.selectbox("Kodowanie", ["utf-8", "iso-8859-2", "windows-1250", "utf-16"])
+        if uploaded_file and instruction:
+            if st.button("Wygeneruj kod Python"):
+                api_key = st.secrets["OPENROUTER_API_KEY"]
+                st.session_state.generated_code = generate_ai_code(
+                    st.session_state.file_info["content"], 
+                    st.session_state.file_info["type"], 
+                    instruction, 
+                    model, 
+                    api_key
+                )
             
-            save_to_drive = st.checkbox("Zapisz na Google Drive", value=True)
+        # Wyświetl wygenerowany kod
+        if st.session_state.generated_code:
+            st.subheader("Wygenerowany kod:")
+            st.code(st.session_state.generated_code, language="python")
             
-        # Historia operacji
-        if st.session_state.history:
-            with st.expander("Historia operacji", expanded=False):
-                for i, item in enumerate(st.session_state.history):
-                    st.write(f"{i+1}. {item['date']} - {item['operation']}")
-                if st.button("Wyczyść historię"):
-                    st.session_state.history = []
-                    st.experimental_rerun()
+            if st.button("Wykonaj kod i zapisz wynik"):
+                result = execute_code_safely(
+                    st.session_state.generated_code, 
+                    st.session_state.file_info
+                )
                 
-    # Główny obszar aplikacji
-    st.title("Edytor AI plików XML i CSV")
-    
-    # Tabs na górze strony
-    tab1, tab2, tab3 = st.tabs(["Edycja pliku", "Wynik", "Pomoc"])
-    
-    with tab1:
-        st.markdown("""
-        To narzędzie umożliwia modyfikację plików XML i CSV przy użyciu sztucznej inteligencji.
-        Prześlij plik i wpisz polecenie w języku naturalnym.
-        """)
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            uploaded_file = st.file_uploader("Wgraj plik XML lub CSV", type=["xml", "csv"])
-        
-        with col2:
-            if uploaded_file:
-                file_info, error = read_file_content(uploaded_file)
-                if error:
-                    st.error(error)
-                else:
-                    st.success(f"Wczytano plik: {file_info['name']}")
-                    st.info(f"Typ: {file_info['type'].upper()} | Kodowanie: {file_info['encoding']} | Rozmiar: {len(file_info['raw_bytes'])/1024:.2f} KB")
-                    st.session_state.file_info = file_info
-        
-        instruction = st.text_area("Instrukcja modyfikacji (w języku naturalnym)", 
-                                placeholder="np.: Dodaj kolumnę Czas dostawy zależnie od dostępności...",
-                                height=150)
-                                
-        if instruction and st.session_state.file_info:
-            st.session_state.file_info["instruction"] = instruction
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.button("Wygeneruj kod Python", type="primary", use_container_width=True):
-                    api_key = st.secrets["OPENROUTER_API_KEY"]
-                    st.session_state.generated_code = generate_ai_code(
-                        st.session_state.file_info["content"], 
-                        st.session_state.file_info["type"], 
-                        instruction, 
-                        model, 
-                        api_key
-                    )
-            
-            with col2:
-                if st.session_state.generated_code and st.button("Wykonaj kod i przetwórz dane", 
-                                                               type="primary", use_container_width=True):
-                    result = execute_code_safely(
-                        st.session_state.generated_code, 
-                        st.session_state.file_info
+                if result["success"]:
+                    st.session_state.output_bytes = result["output"]
+                    
+                    # Zapisz na Google Drive
+                    success, message = save_to_google_drive(
+                        st.session_state.output_bytes,
+                        st.session_state.file_info,
+                        instruction,
+                        st.session_state.generated_code
                     )
                     
-                    if result["success"]:
-                        st.session_state.output_bytes = result["output"]
-                        st.session_state.success_message = "Dane zostały pomyślnie przetworzone! 🎉"
-                        st.session_state.error_message = None
-                        
-                        # Zapisz na Google Drive jeśli wybrano
-                        if save_to_drive:
-                            success, message = save_to_google_drive(
-                                st.session_state.output_bytes,
-                                st.session_state.file_info,
-                                instruction,
-                                st.session_state.generated_code
-                            )
-                            if success:
-                                st.session_state.success_message += f" {message}"
-                            else:
-                                st.session_state.error_message = message
+                    if success:
+                        st.success(f"Dane zostały pomyślnie przetworzone! {message}")
                     else:
-                        st.session_state.error_message = f"Błąd: {result['error']}"
-                        st.session_state.success_message = None
-                        if "traceback" in result:
-                            st.session_state.error_traceback = result["traceback"]
-                            
-                    # Przełącz na zakładkę wyników
-                    tab2.button("Przejdź do wyników", type="primary", use_container_width=True)
+                        st.warning(f"Dane przetworzone, ale {message}")
+                else:
+                    st.error(f"Błąd: {result['error']}")
+                    with st.expander("Szczegóły błędu", expanded=False):
+                        st.code(result["traceback"])
         
-        if st.session_state.generated_code:
-            st.subheader("Wygenerowany kod Python:")
-            with st.expander("Pokaż/ukryj kod", expanded=True):
-                st.code(st.session_state.generated_code, language="python")
-            
-    with tab2:
-        if st.session_state.success_message:
-            st.success(st.session_state.success_message)
-            
-        if st.session_state.error_message:
-            st.error(st.session_state.error_message)
-            if "error_traceback" in st.session_state:
-                with st.expander("Szczegóły błędu", expanded=False):
-                    st.code(st.session_state.error_traceback)
-        
+        # Wyświetl wynik i przycisk pobierania, jeśli jest wygenerowany plik
         if st.session_state.output_bytes:
             st.subheader("Wynik przetwarzania:")
             
@@ -430,39 +359,25 @@ def create_ui():
                 elif st.session_state.file_info["type"] == "csv":
                     csv_content = st.session_state.output_bytes.decode("utf-8", errors="replace")
                     df = pd.read_csv(io.StringIO(csv_content))
-                    st.dataframe(df.head(10), use_container_width=True)
+                    st.dataframe(df.head(10))
                     if len(df) > 10:
                         st.info(f"Wyświetlono 10 z {len(df)} wierszy")
             except Exception as e:
                 st.warning(f"Nie można wyświetlić podglądu: {str(e)}")
             
-            # Przyciski pobierania i zapisu
-            col1, col2 = st.columns(2)
+            # Przycisk pobierania
+            file_type = st.session_state.file_info["type"]
+            original_name = st.session_state.file_info["name"]
+            base_name = os.path.splitext(original_name)[0]
             
-            with col1:
-                file_type = st.session_state.file_info["type"]
-                original_name = st.session_state.file_info["name"]
-                base_name = os.path.splitext(original_name)[0]
-                
-                st.download_button(
-                    label=f"📁 Pobierz przetworzony plik ({file_type.upper()})",
-                    data=st.session_state.output_bytes,
-                    file_name=f"{base_name}_processed.{file_type}",
-                    mime="text/plain",
-                    use_container_width=True
-                )
-            
-            with col2:
-                if st.button("Nowa edycja", use_container_width=True):
-                    # Zachowaj historię, ale wyczyść pozostałe dane sesji
-                    history = st.session_state.history
-                    for key in st.session_state.keys():
-                        if key != "history" and key != "authenticated":
-                            del st.session_state[key]
-                    st.session_state.history = history
-                    st.experimental_rerun()
+            st.download_button(
+                label=f"📁 Pobierz zmodyfikowany plik",
+                data=st.session_state.output_bytes,
+                file_name=f"{base_name}_processed.{file_type}",
+                mime="text/plain"
+            )
     
-    with tab3:
+    with tab2:
         st.markdown("""
         ### Jak korzystać z aplikacji
         
@@ -484,23 +399,6 @@ def create_ui():
         - **XML** - modyfikacja struktury, atrybutów i wartości
         - **CSV** - operacje na kolumnach, filtrowanie, agregacja
         """)
-
-
-def main():
-    """Główna funkcja aplikacji"""
-    # Uwierzytelnianie
-    if not authenticate_user():
-        return
-        
-    # Inicjalizacja stanu sesji
-    initialize_session_state()
-    
-    # Wyświetl interfejs
-    create_ui()
-    
-    # Obsługa błędów globalnych
-    if st.session_state.error_message and "error_traceback" not in st.session_state:
-        st.error(st.session_state.error_message)
 
 
 if __name__ == "__main__":
