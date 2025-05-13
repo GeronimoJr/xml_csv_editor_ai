@@ -336,7 +336,6 @@ def main():
         model = st.selectbox("Wybierz model LLM (OpenRouter)", [
             "openai/gpt-4o-mini",
             "openai/gpt-4o",
-            "openai/gpt-4-turbo",
             "anthropic/claude-3.5-haiku",
             "anthropic/claude-3.7-sonnet",
             "google/gemini-2.5-pro-preview"
