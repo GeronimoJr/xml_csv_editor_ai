@@ -334,11 +334,11 @@ def main():
         instruction = st.text_area("Instrukcja modyfikacji (w języku naturalnym)")
         
         model = st.selectbox("Wybierz model LLM (OpenRouter)", [
-            "openai/gpt-4o-mini",
-            "openai/gpt-4o",
-            "anthropic/claude-3.5-haiku",
-            "anthropic/claude-3.7-sonnet",
-            "google/gemini-2.5-pro-preview"
+            "openai/gpt-4o-mini:floor",
+            "openai/gpt-4o:floor",
+            "anthropic/claude-3.5-haiku:floor",
+            "anthropic/claude-3.7-sonnet:floor",
+            "google/gemini-2.5-pro-preview:floor"
         ])
         
         if uploaded_file and instruction:
