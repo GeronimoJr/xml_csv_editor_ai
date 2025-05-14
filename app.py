@@ -501,7 +501,6 @@ def toggle_editor():
 def handle_fix_request():
     """Obsługuje żądanie naprawy kodu"""
     st.session_state.fix_requested = True
-    st.rerun()  # Natychmiastowe odświeżenie strony
 
 
 def main():
@@ -646,7 +645,7 @@ def main():
                         if error_location != "Nieokreślona":
                             st.markdown(f"**Lokalizacja błędu:** {error_location}")
                     
-                    # NAPRAWIONO: Przyciski do naprawy z unikalnymi kluczami
+                    # DODANE: Przyciski do naprawy kodu z powrotem
                     repair_col1, repair_col2 = st.columns([1, 1])
                     with repair_col1:
                         if st.button("Napraw kod z pomocą AI", key="ai_repair_button", on_click=handle_fix_request):
@@ -656,49 +655,54 @@ def main():
                         if st.button("Przejdź do ręcznej edycji", key="manual_edit_button"):
                             st.session_state.show_editor = True
                             st.rerun()
+            
+            # Kod naprawy - umieszczony poza blokiem przycisku wykonania
+            if st.session_state.fix_requested and st.session_state.error_info and not st.session_state.code_fixed:
+                api_key = st.secrets["OPENROUTER_API_KEY"]
+                
+                # Używanie danych z zapisanego stanu błędu, a nie z zmiennej result która może nie istnieć
+                error_data = st.session_state.get("error_data", {})
+                error_message = error_data.get("error", "Unknown error")
+                traceback_str = error_data.get("traceback", "No traceback available")
+                
+                with st.spinner("Naprawiam kod z pomocą AI..."):
+                    fixed_code = fix_code_with_ai(
+                        code_to_execute,
+                        error_message,
+                        traceback_str,
+                        st.session_state.file_info,
+                        instruction,
+                        model,
+                        api_key,
+                        max_attempts=2
+                    )
                     
-                    # NAPRAWIONO: Obsługa żądania naprawy kodu z pomocą AI
-                    if st.session_state.fix_requested and st.session_state.error_info:
-                        api_key = st.secrets["OPENROUTER_API_KEY"]
-                        fixed_code = fix_code_with_ai(
-                            code_to_execute,
-                            result["error"],
-                            result["traceback"],
-                            st.session_state.file_info,
-                            instruction,
-                            model,
-                            api_key,
-                            max_attempts=2
-                        )
-                        
-                        if fixed_code:
-                            st.session_state.edited_code = fixed_code
-                            st.session_state.code_fixed = True
-                            st.session_state.fix_requested = False
-                            st.success("Kod został naprawiony. Możesz teraz ponownie wykonać kod.")
-                            st.rerun()
-                        else:
-                            st.error("Nie udało się naprawić kodu automatycznie. Spróbuj ręcznej edycji.")
-                            st.session_state.show_editor = True
-                            st.session_state.fix_requested = False
-                            st.rerun()
-        
-        # Przycisk pobierania jeśli jest wygenerowany plik
-        if st.session_state.output_bytes:
-            file_type = st.session_state.file_info["type"]
-            original_name = st.session_state.file_info["name"]
-            base_name = os.path.splitext(original_name)[0]
+                    if fixed_code:
+                        st.session_state.edited_code = fixed_code
+                        st.session_state.code_fixed = True
+                        st.session_state.fix_requested = False
+                        st.success("Kod został naprawiony. Możesz teraz ponownie wykonać kod.")
+                    else:
+                        st.error("Nie udało się naprawić kodu automatycznie. Spróbuj ręcznej edycji.")
+                        st.session_state.show_editor = True
+                        st.session_state.fix_requested = False
             
-            st.download_button(
-                label=f"📁 Pobierz zmodyfikowany plik",
-                data=st.session_state.output_bytes,
-                file_name=f"{base_name}_processed.{file_type}",
-                mime="text/plain"
-            )
-            
-            # Dodanie przycisku "Ponowna edycja" na końcu
-            if st.button("Ponowna edycja"):
-                reset_app_state()
+            # Przycisk pobierania jeśli jest wygenerowany plik
+            if st.session_state.output_bytes:
+                file_type = st.session_state.file_info["type"]
+                original_name = st.session_state.file_info["name"]
+                base_name = os.path.splitext(original_name)[0]
+                
+                st.download_button(
+                    label=f"📁 Pobierz zmodyfikowany plik",
+                    data=st.session_state.output_bytes,
+                    file_name=f"{base_name}_processed.{file_type}",
+                    mime="text/plain"
+                )
+                
+                # Dodanie przycisku "Ponowna edycja" na końcu
+                if st.button("Ponowna edycja"):
+                    reset_app_state()
 
     with tab2:
         st.markdown("""
