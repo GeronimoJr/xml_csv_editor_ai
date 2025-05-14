@@ -50,6 +50,8 @@ def initialize_session_state():
         st.session_state.error_info = None
     if "code_fixed" not in st.session_state:
         st.session_state.code_fixed = False
+    if "fix_requested" not in st.session_state:
+        st.session_state.fix_requested = False
 
 
 def read_file_content(uploaded_file):
@@ -158,66 +160,196 @@ Nie dodawaj żadnych opisów ani komentarzy. Zwróć wyłącznie czysty kod Pyth
         return f"Błąd podczas komunikacji z API: {str(e)}"
 
 
-def fix_code_with_ai(code, error_message, traceback_str, file_type, model, api_key):
-    """Próbuje naprawić kod z użyciem AI"""
-    prompt = f"""
-Wygenerowany kod Python ma błąd. Napraw go, aby poprawnie działał.
+def fix_code_with_ai(code, error_message, traceback_str, file_info, instruction, model, api_key, max_attempts=2):
+    """
+    Próbuje naprawić kod z użyciem AI z ulepszoną skutecznością
+    
+    Args:
+        code: Kod do naprawy
+        error_message: Komunikat błędu
+        traceback_str: Pełny traceback
+        file_info: Informacje o pliku
+        instruction: Oryginalna instrukcja użytkownika
+        model: Model LLM do użycia
+        api_key: Klucz API
+        max_attempts: Maksymalna liczba prób naprawy
+    
+    Returns:
+        Naprawiony kod lub None w przypadku niepowodzenia
+    """
+    # Wyodrębnij najważniejsze informacje z traceback
+    error_type = "Unknown Error"
+    error_line = "Unknown"
+    problematic_code = ""
+    
+    # Znajdź typ błędu i linię błędu
+    tb_lines = traceback_str.strip().split("\n")
+    for i, line in enumerate(tb_lines):
+        if "Error:" in line:
+            error_type = line.strip()
+        if "line " in line and ".py" in line:
+            # Spróbuj wyodrębnić numer linii
+            match = re.search(r"line (\d+)", line)
+            if match:
+                line_num = int(match.group(1))
+                error_line = f"Line {line_num}"
+                
+                # Spróbuj znaleźć problematyczny kod
+                code_lines = code.split("\n")
+                if line_num <= len(code_lines):
+                    start = max(0, line_num - 3)
+                    end = min(len(code_lines), line_num + 2)
+                    problematic_code = "\n".join(code_lines[start:end])
+    
+    # Przeanalizuj typ błędu, aby dostarczyć bardziej kontekstowe wskazówki
+    error_hint = ""
+    if "TypeError" in error_type:
+        error_hint = "Sprawdź typy danych i operacje na nich. Możliwe, że próbujesz wykonać operację na niewłaściwym typie."
+    elif "IndexError" in error_type or "KeyError" in error_type:
+        error_hint = "Sprawdź indeksowanie list/słowników. Możliwe, że próbujesz uzyskać dostęp do nieistniejącego elementu."
+    elif "AttributeError" in error_type:
+        error_hint = "Sprawdź, czy obiekt posiada wywoływaną metodę/atrybut. Możliwe, że pracujesz na niewłaściwym typie obiektu."
+    elif "FileNotFoundError" in error_type:
+        error_hint = "Sprawdź ścieżki plików. Upewnij się, że używasz zmiennych input_path i output_path."
+    elif "ValueError" in error_type and "encoding" in error_message:
+        error_hint = "Sprawdź kodowanie pliku. Dodaj obsługę różnych kodowań."
+    elif "SyntaxError" in error_type:
+        error_hint = "Kod zawiera błąd składniowy. Sprawdź nawiasy, wcięcia, przecinki i inne elementy składni."
+    
+    # Pobierz fragment danych wejściowych, jeśli dostępne
+    sample_data = ""
+    if file_info and "content" in file_info:
+        sample_data = file_info["content"][:500] + "..." if len(file_info["content"]) > 500 else file_info["content"]
+    
+    for attempt in range(max_attempts):
+        # Różne podejścia do naprawy w zależności od numeru próby
+        approach = ""
+        if attempt == 0:
+            approach = "Napraw tylko zidentyfikowany błąd, zachowując ogólną strukturę kodu."
+        else:
+            approach = "Spróbuj całkowicie przebudować kod, skupiając się na oryginalnym zadaniu."
+            
+        prompt = f"""
+Jestem ekspertem w naprawianiu kodu Python i potrzebuję naprawić kod przetwarzający plik {file_info['type'].upper()}.
 
-Kod:
+## Oryginalny kod z błędem:
 ```python
 {code}
-Błąd:
-{error_message}
+Szczegóły błędu:
 
-Pełny traceback:
-{traceback_str}
+Typ błędu: {error_type}
 
-Ten kod ma przetwarzać plik {file_type.upper()}. Po naprawieniu, powinien:
+Lokalizacja: {error_line}
+
+Komunikat: {error_message}
+
+Problematyczny fragment:
+python
+
+{problematic_code}
+Analiza błędu:
+{error_hint}
+
+Dane wejściowe (fragment):
+code
+
+{sample_data}
+Kontekst zadania:
+Ten kod ma realizować następującą instrukcję: "{instruction}"
+
+Podejście do naprawy (próba {attempt+1}):
+{approach}
+
+Podejście naprawcze:
 
 
-Wczytać plik z input_path
+Znajdź i napraw główną przyczynę błędu
 
-Przetworzyć dane
+Upewnij się, że kod korzysta ze zmiennych input_path do wczytania i output_path do zapisu
 
-Zapisać wynik do output_path
+Dostosuj kod, aby był odporny na różne formaty danych
 
-Zwróć tylko poprawiony kod, bez żadnych wyjaśnień, komentarzy czy nagłówków markdown.
+Zachowaj podstawowe funkcjonalności zgodne z intencją oryginalnego kodu
+
+Zwróć TYLKO poprawiony, działający kod jako blok kodu Python, bez żadnych wyjaśnień.
 """
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        data = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": "Jestem ekspertem w naprawianiu kodu Python, szczególnie do przetwarzania plików XML i CSV."},
+                {"role": "user", "content": prompt}
+            ],
+            "temperature": 0.3  # Niższe temperature dla bardziej deterministycznych odpowiedzi
+        }
 
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
+        try:
+            with st.spinner(f"Naprawianie kodu (próba {attempt+1}/{max_attempts})..."):
+                res = requests.post("https://openrouter.ai/api/v1/chat/completions", 
+                                    headers=headers, json=data, timeout=90)  # Dłuższy timeout
+                res.raise_for_status()
+                
+                fixed_code = res.json()["choices"][0]["message"]["content"]
+                # Czyszczenie kodu
+                fixed_code = re.sub(r"```(?:python)?\n", "", fixed_code)
+                fixed_code = fixed_code.replace("```", "")
+                
+                # Dodatkowe czyszczenie
+                fixed_code = fixed_code.strip()
+                
+                # Walidacja kodu - sprawdzenie składni
+                try:
+                    ast.parse(fixed_code)
+                    clean_code = clean_and_validate_code(fixed_code)
+                    
+                    # Sprawdzenie czy kod zawiera wymagane elementy
+                    if "input_path" not in clean_code or "output_path" not in clean_code:
+                        continue  # Jeśli brakuje kluczowych elementów, spróbuj ponownie
+                    
+                    return clean_code
+                except SyntaxError:
+                    # Jeśli składnia wciąż jest niepoprawna, próbujemy ponownie
+                    continue
+                
+        except requests.exceptions.RequestException as e:
+            st.warning(f"Błąd podczas komunikacji z API: {str(e)}. Ponowna próba...")
+            continue
+
+    # Jeśli wszystkie próby się nie powiodły, zwróć None
+    return None
+
+def validate_code_logic(code, file_type):
+    """
+    Sprawdza czy kod zawiera logiczne elementy potrzebne do obsługi danego typu pliku
+
+    Args:
+        code: Kod do sprawdzenia
+        file_type: Typ pliku (xml lub csv)
+
+    Returns:
+        True jeśli kod wydaje się logicznie poprawny, False w przeciwnym razie
+    """
+    required_elements = {
+        'xml': ['ElementTree', 'parse', 'write', 'findall', 'Element'],
+        'csv': ['pandas', 'pd', 'read_csv', 'to_csv', 'DataFrame']
     }
-    data = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": "Jesteś ekspertem w naprawianiu kodu Python."},
-            {"role": "user", "content": prompt}
-        ]
-    }
 
-    try:
-        with st.spinner("Naprawianie kodu..."):
-            res = requests.post("https://openrouter.ai/api/v1/chat/completions", 
-                                headers=headers, json=data, timeout=60)
-            res.raise_for_status()
-            
-            fixed_code = res.json()["choices"][0]["message"]["content"]
-            # Czyszczenie kodu
-            fixed_code = re.sub(r"```(?:python)?\n", "", fixed_code)
-            fixed_code = fixed_code.replace("```", "")
-            
-            return clean_and_validate_code(fixed_code)
-            
-    except requests.exceptions.RequestException as e:
-        return None
+    elements_count = 0
+    for element in required_elements.get(file_type, []):
+        if element in code:
+            elements_count += 1
 
+    # Sprawdź czy kod zawiera przynajmniej 2 wymagane elementy dla danego typu pliku
+    return elements_count >= 2
 
 def clean_and_validate_code(code):
     """Czyści i waliduje wygenerowany kod"""
     # Usuwaj puste linie i whitespace
     code = "\n".join([line for line in code.splitlines() if line.strip()])
-    
+
     # Upewnij się, że kod jest poprawny składniowo
     def sanitize_code(code):
         lines = code.strip().splitlines()
@@ -228,9 +360,8 @@ def clean_and_validate_code(code):
             except SyntaxError:
                 lines.pop()
         return "\n".join(lines)
-    
-    return sanitize_code(code).strip()
 
+    return sanitize_code(code).strip()
 
 def execute_code_safely(code_to_execute, file_info):
     """Wykonuje wygenerowany kod w bezpiecznym środowisku"""
@@ -242,7 +373,7 @@ def execute_code_safely(code_to_execute, file_info):
             # Zapisz plik wejściowy
             with open(input_path, "wb") as f:
                 f.write(file_info["raw_bytes"])
-            
+
             # Przygotuj kod do wykonania
             code = code_to_execute
             code = re.sub(r"input_path\s*=.*", "", code)
@@ -270,7 +401,6 @@ def execute_code_safely(code_to_execute, file_info):
             except Exception as e:
                 return {"success": False, "error": str(e), "traceback": traceback.format_exc()}
 
-
 def save_to_google_drive(output_bytes, file_info, instruction, code_executed):
     """Zapisuje wyniki do Google Drive"""
     try:
@@ -280,7 +410,7 @@ def save_to_google_drive(output_bytes, file_info, instruction, code_executed):
 
         if not drive_folder_id or not credentials_json:
             return False, "Brak konfiguracji Google Drive."
-        
+
         now = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         log_filename = f"history_{now}.txt"
         result_filename = f"output_{now}.{file_info['type']}"
@@ -345,11 +475,10 @@ def save_to_google_drive(output_bytes, file_info, instruction, code_executed):
                 except Exception as upload_error:
                     st.error(f"Błąd podczas wysyłania plików: {str(upload_error)}")
                     return False, f"Błąd podczas wysyłania plików: {str(upload_error)}"
-                
+            
     except Exception as e:
         st.error(f"Błąd podczas zapisu na Google Drive: {str(e)}")
         return False, f"Błąd podczas zapisu na Google Drive: {str(e)}"
-
 
 def reset_app_state():
     """Resetuje stan aplikacji do ponownej edycji"""
@@ -359,13 +488,16 @@ def reset_app_state():
     initialize_session_state()
     st.rerun()
 
-
 def toggle_editor():
     """Przełącza widoczność edytora kodu"""
     st.session_state.show_editor = not st.session_state.show_editor
     if st.session_state.show_editor:
         st.session_state.edited_code = st.session_state.generated_code
 
+def handle_fix_request():
+    """Obsługuje żądanie naprawy kodu"""
+    if st.session_state.error_info:
+        st.session_state.fix_requested = True
 
 def main():
     """Główna funkcja aplikacji"""
@@ -424,6 +556,7 @@ def main():
                 st.session_state.show_editor = False
                 st.session_state.code_fixed = False
                 st.session_state.error_info = None
+                st.session_state.fix_requested = False
         
         # Wyświetl wygenerowany kod
         if st.session_state.generated_code:
@@ -445,7 +578,7 @@ def main():
             
             # Wyświetl informacje o naprawionym kodzie
             if st.session_state.code_fixed:
-                st.info("Kod został automatycznie naprawiony po wykryciu błędu.")
+                st.info("Kod został naprawiony po wykryciu błędu.")
                 with st.expander("Pokaż naprawiony kod", expanded=False):
                     st.code(st.session_state.edited_code, language="python")
             
@@ -475,37 +608,63 @@ def main():
                             st.success(f"✅ {message}")
                         else:
                             st.warning(f"⚠️ {message}")
-                        
+                    
                     except Exception as e:
                         st.error(f"Błąd podczas zapisywania na Google Drive: {str(e)}")
                 else:
                     st.error(f"Błąd: {result['error']}")
                     st.session_state.error_info = result
                     
+                    # Dodaj więcej szczegółów diagnostycznych 
                     with st.expander("Szczegóły błędu", expanded=True):
                         st.code(result["traceback"])
+                        
+                        # Dodatkowa analiza błędu dla lepszego zrozumienia
+                        error_type = "Nieokreślony"
+                        error_location = "Nieokreślona"
+                        
+                        tb_lines = result["traceback"].strip().split("\n")
+                        for line in tb_lines:
+                            if "Error:" in line:
+                                error_type = line.strip()
+                            if "line " in line and ".py" in line:
+                                error_location = line.strip()
+                        
+                        st.markdown(f"**Typ błędu:** {error_type}")
+                        if error_location != "Nieokreślona":
+                            st.markdown(f"**Lokalizacja błędu:** {error_location}")
                     
-                    # Automatyczna próba naprawy kodu
-                    st.warning("Próbuję automatycznie naprawić kod...")
-                    api_key = st.secrets["OPENROUTER_API_KEY"]
-                    fixed_code = fix_code_with_ai(
-                        code_to_execute,
-                        result["error"],
-                        result["traceback"],
-                        st.session_state.file_info["type"],
-                        model,
-                        api_key
-                    )
+                    # Przycisk do naprawy kodu z ulepszoną funkcją
+                    repair_col1, repair_col2 = st.columns([1, 1])
+                    with repair_col1:
+                        if st.button("Napraw kod z pomocą AI"):
+                            st.session_state.fix_requested = True
+                            api_key = st.secrets["OPENROUTER_API_KEY"]
+                            fixed_code = fix_code_with_ai(
+                                code_to_execute,
+                                result["error"],
+                                result["traceback"],
+                                st.session_state.file_info,
+                                instruction,  # Dodajemy instrukcję użytkownika dla kontekstu
+                                model,
+                                api_key,
+                                max_attempts=2  # Ustawiamy 2 próby naprawy
+                            )
+                            
+                            if fixed_code:
+                                st.session_state.edited_code = fixed_code
+                                st.session_state.code_fixed = True
+                                st.success("Kod został naprawiony. Możesz teraz ponownie wykonać kod.")
+                                st.rerun()
+                            else:
+                                st.error("Nie udało się naprawić kodu automatycznie. Spróbuj ręcznej edycji.")
+                                st.session_state.show_editor = True
+                                st.rerun()
                     
-                    if fixed_code:
-                        st.session_state.edited_code = fixed_code
-                        st.session_state.code_fixed = True
-                        st.success("Kod został naprawiony. Możesz teraz ponownie wykonać kod.")
-                        st.rerun()
-                    else:
-                        st.error("Nie udało się automatycznie naprawić kodu. Spróbuj ręcznej edycji.")
-                        st.session_state.show_editor = True
-                        st.rerun()
+                    with repair_col2:
+                        if st.button("Przejdź do ręcznej edycji"):
+                            st.session_state.show_editor = True
+                            st.rerun()
         
         # Przycisk pobierania jeśli jest wygenerowany plik
         if st.session_state.output_bytes:
@@ -533,7 +692,9 @@ def main():
         3. **Wygeneruj kod** - AI stworzy kod Pythona wykonujący twoje polecenie
         4. **Opcjonalnie: Edytuj kod** - kliknij przycisk "Edytuj kod", aby zmodyfikować wygenerowany kod
         5. **Wykonaj kod** - przetworzy twoje dane według instrukcji
-        6. **W przypadku błędu** - aplikacja automatycznie spróbuje naprawić kod
+        6. **W przypadku błędu** - możesz:
+           - Użyć przycisku "Napraw kod z pomocą AI" do automatycznej naprawy kodu
+           - Wybrać "Przejdź do ręcznej edycji" aby samodzielnie poprawić kod
         7. **Pobierz wynik** - zapisz przetworzony plik lokalnie
         
         ### Przykłady instrukcji
