@@ -38,10 +38,14 @@ def initialize_session_state():
     """Inicjalizacja zmiennych sesji"""
     if "generated_code" not in st.session_state:
         st.session_state.generated_code = ""
+    if "edited_code" not in st.session_state:
+        st.session_state.edited_code = ""
     if "output_bytes" not in st.session_state:
         st.session_state.output_bytes = None
     if "file_info" not in st.session_state:
         st.session_state.file_info = None
+    if "code_edited" not in st.session_state:
+        st.session_state.code_edited = False
 
 
 def read_file_content(uploaded_file):
@@ -169,7 +173,7 @@ def clean_and_validate_code(code):
     return sanitize_code(code).strip()
 
 
-def execute_code_safely(generated_code, file_info):
+def execute_code_safely(code_to_execute, file_info):
     """Wykonuje wygenerowany kod w bezpiecznym środowisku"""
     with st.spinner("Wykonuję kod i przetwarzam dane..."):
         with tempfile.TemporaryDirectory() as tmpdirname:
@@ -181,7 +185,7 @@ def execute_code_safely(generated_code, file_info):
                 f.write(file_info["raw_bytes"])
             
             # Przygotuj kod do wykonania
-            code = generated_code
+            code = code_to_execute
             code = re.sub(r"input_path\s*=.*", "", code)
             code = re.sub(r"output_path\s*=.*", "", code)
             
@@ -208,7 +212,7 @@ def execute_code_safely(generated_code, file_info):
                 return {"success": False, "error": str(e), "traceback": traceback.format_exc()}
 
 
-def save_to_google_drive(output_bytes, file_info, instruction, generated_code):
+def save_to_google_drive(output_bytes, file_info, instruction, code_executed):
     """Zapisuje wyniki do Google Drive"""
     try:
         # Sprawdź, czy mamy wszystkie potrzebne dane konfiguracyjne
@@ -231,7 +235,7 @@ def save_to_google_drive(output_bytes, file_info, instruction, generated_code):
             with open(temp_result_path, "wb") as f:
                 f.write(output_bytes)
                 
-            log_content = f"INSTRUCTION:\n{instruction}\n\nCODE:\n{generated_code}"
+            log_content = f"INSTRUCTION:\n{instruction}\n\nCODE:\n{code_executed}"
             with open(temp_log_path, "w", encoding='utf-8') as f:
                 f.write(log_content)
             
@@ -288,7 +292,6 @@ def save_to_google_drive(output_bytes, file_info, instruction, generated_code):
         return False, f"Błąd podczas zapisu na Google Drive: {str(e)}"
 
 
-
 def reset_app_state():
     """Resetuje stan aplikacji do ponownej edycji"""
     for key in list(st.session_state.keys()):
@@ -296,6 +299,11 @@ def reset_app_state():
             del st.session_state[key]
     initialize_session_state()
     st.rerun()
+
+
+def update_edited_code():
+    """Aktualizuje edytowany kod w stanie sesji"""
+    st.session_state.code_edited = True
 
 
 def main():
@@ -351,15 +359,25 @@ def main():
                     model, 
                     api_key
                 )
+                st.session_state.edited_code = st.session_state.generated_code
+                st.session_state.code_edited = False
             
-        # Wyświetl wygenerowany kod
+        # Wyświetl wygenerowany kod do edycji
         if st.session_state.generated_code:
-            st.subheader("Wygenerowany kod:")
-            st.code(st.session_state.generated_code, language="python")
+            st.subheader("Edytuj kod przed wykonaniem:")
+            
+            # Dodanie edytora kodu
+            st.session_state.edited_code = st.text_area(
+                "Edycja kodu",
+                value=st.session_state.edited_code if st.session_state.code_edited else st.session_state.generated_code,
+                height=400,
+                key="code_editor",
+                on_change=update_edited_code
+            )
             
             if st.button("Wykonaj kod i zapisz wynik"):
                 result = execute_code_safely(
-                    st.session_state.generated_code, 
+                    st.session_state.edited_code, 
                     st.session_state.file_info
                 )
                 
@@ -373,7 +391,7 @@ def main():
                             st.session_state.output_bytes,
                             st.session_state.file_info,
                             instruction,
-                            st.session_state.generated_code
+                            st.session_state.edited_code
                         )
                         
                         if success:
@@ -412,8 +430,9 @@ def main():
         1. **Wgraj plik XML lub CSV** - aplikacja automatycznie wykryje kodowanie
         2. **Wpisz instrukcję** - opisz w języku naturalnym, co chcesz zmodyfikować
         3. **Wygeneruj kod** - AI stworzy kod Pythona wykonujący twoje polecenie
-        4. **Wykonaj kod** - przetworzy twoje dane według instrukcji
-        5. **Pobierz wynik** - zapisz przetworzony plik lokalnie
+        4. **Edytuj kod** - zmodyfikuj wygenerowany kod według potrzeb
+        5. **Wykonaj kod** - przetworzy twoje dane według instrukcji
+        6. **Pobierz wynik** - zapisz przetworzony plik lokalnie
         
         ### Przykłady instrukcji
         
