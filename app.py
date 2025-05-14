@@ -244,15 +244,11 @@ Lokalizacja: {error_line}
 Komunikat: {error_message}
 
 Problematyczny fragment:
-python
-
 {problematic_code}
 Analiza błędu:
 {error_hint}
 
 Dane wejściowe (fragment):
-code
-
 {sample_data}
 Kontekst zadania:
 Ten kod ma realizować następującą instrukcję: "{instruction}"
@@ -291,7 +287,7 @@ Zwróć TYLKO poprawiony, działający kod jako blok kodu Python, bez żadnych w
                 res = requests.post("https://openrouter.ai/api/v1/chat/completions", 
                                     headers=headers, json=data, timeout=90)  # Dłuższy timeout
                 res.raise_for_status()
-                
+
                 fixed_code = res.json()["choices"][0]["message"]["content"]
                 # Czyszczenie kodu
                 fixed_code = re.sub(r"```(?:python)?\n", "", fixed_code)
@@ -299,12 +295,12 @@ Zwróć TYLKO poprawiony, działający kod jako blok kodu Python, bez żadnych w
                 
                 # Dodatkowe czyszczenie
                 fixed_code = fixed_code.strip()
-                
+
                 # Walidacja kodu - sprawdzenie składni
                 try:
                     ast.parse(fixed_code)
                     clean_code = clean_and_validate_code(fixed_code)
-                    
+
                     # Sprawdzenie czy kod zawiera wymagane elementy
                     if "input_path" not in clean_code or "output_path" not in clean_code:
                         continue  # Jeśli brakuje kluczowych elementów, spróbuj ponownie
@@ -313,7 +309,7 @@ Zwróć TYLKO poprawiony, działający kod jako blok kodu Python, bez żadnych w
                 except SyntaxError:
                     # Jeśli składnia wciąż jest niepoprawna, próbujemy ponownie
                     continue
-                
+
         except requests.exceptions.RequestException as e:
             st.warning(f"Błąd podczas komunikacji z API: {str(e)}. Ponowna próba...")
             continue
@@ -321,14 +317,15 @@ Zwróć TYLKO poprawiony, działający kod jako blok kodu Python, bez żadnych w
     # Jeśli wszystkie próby się nie powiodły, zwróć None
     return None
 
+
 def validate_code_logic(code, file_type):
     """
     Sprawdza czy kod zawiera logiczne elementy potrzebne do obsługi danego typu pliku
-
+    
     Args:
         code: Kod do sprawdzenia
         file_type: Typ pliku (xml lub csv)
-
+    
     Returns:
         True jeśli kod wydaje się logicznie poprawny, False w przeciwnym razie
     """
@@ -345,11 +342,12 @@ def validate_code_logic(code, file_type):
     # Sprawdź czy kod zawiera przynajmniej 2 wymagane elementy dla danego typu pliku
     return elements_count >= 2
 
+
 def clean_and_validate_code(code):
     """Czyści i waliduje wygenerowany kod"""
     # Usuwaj puste linie i whitespace
     code = "\n".join([line for line in code.splitlines() if line.strip()])
-
+    
     # Upewnij się, że kod jest poprawny składniowo
     def sanitize_code(code):
         lines = code.strip().splitlines()
@@ -363,13 +361,14 @@ def clean_and_validate_code(code):
 
     return sanitize_code(code).strip()
 
+
 def execute_code_safely(code_to_execute, file_info):
     """Wykonuje wygenerowany kod w bezpiecznym środowisku"""
     with st.spinner("Wykonuję kod i przetwarzam dane..."):
         with tempfile.TemporaryDirectory() as tmpdirname:
             input_path = os.path.join(tmpdirname, f"input.{file_info['type']}")
             output_path = os.path.join(tmpdirname, f"output.{file_info['type']}")
-
+            
             # Zapisz plik wejściowy
             with open(input_path, "wb") as f:
                 f.write(file_info["raw_bytes"])
@@ -401,13 +400,14 @@ def execute_code_safely(code_to_execute, file_info):
             except Exception as e:
                 return {"success": False, "error": str(e), "traceback": traceback.format_exc()}
 
+
 def save_to_google_drive(output_bytes, file_info, instruction, code_executed):
     """Zapisuje wyniki do Google Drive"""
     try:
         # Sprawdź, czy mamy wszystkie potrzebne dane konfiguracyjne
         drive_folder_id = st.secrets.get("GOOGLE_DRIVE_FOLDER_ID")
         credentials_json = st.secrets.get("GOOGLE_DRIVE_CREDENTIALS_JSON")
-
+        
         if not drive_folder_id or not credentials_json:
             return False, "Brak konfiguracji Google Drive."
 
@@ -480,6 +480,7 @@ def save_to_google_drive(output_bytes, file_info, instruction, code_executed):
         st.error(f"Błąd podczas zapisu na Google Drive: {str(e)}")
         return False, f"Błąd podczas zapisu na Google Drive: {str(e)}"
 
+
 def reset_app_state():
     """Resetuje stan aplikacji do ponownej edycji"""
     for key in list(st.session_state.keys()):
@@ -488,22 +489,25 @@ def reset_app_state():
     initialize_session_state()
     st.rerun()
 
+
 def toggle_editor():
     """Przełącza widoczność edytora kodu"""
-    st.session_state.show_editor = not st.session_state.show_editor
-    if st.session_state.show_editor:
+    current_state = st.session_state.show_editor
+    st.session_state.show_editor = not current_state
+    if not current_state:  # tylko jeśli edytor był wcześniej ukryty
         st.session_state.edited_code = st.session_state.generated_code
+
 
 def handle_fix_request():
     """Obsługuje żądanie naprawy kodu"""
-    if st.session_state.error_info:
-        st.session_state.fix_requested = True
+    st.session_state.fix_requested = True
+    st.rerun()  # Natychmiastowe odświeżenie strony
+
 
 def main():
     """Główna funkcja aplikacji"""
     # Ustawienia strony
     st.set_page_config(page_title="Edytor XML/CSV z AI", layout="centered")
-
     # Uwierzytelnianie
     authenticate_user()
 
@@ -563,9 +567,10 @@ def main():
             st.subheader("Wygenerowany kod Python:")
             st.code(st.session_state.generated_code, language="python")
             
-            # Przycisk do pokazania/ukrycia edytora
-            if st.button("Edytuj kod" if not st.session_state.show_editor else "Ukryj edytor"):
+            # NAPRAWIONO: Dodanie key do przycisku, aby uniknąć opóźnień
+            if st.button("Edytuj kod" if not st.session_state.show_editor else "Ukryj edytor", key="toggle_editor_button"):
                 toggle_editor()
+                st.rerun()  # Natychmiastowe odświeżenie interfejsu
             
             # Wyświetl edytor kodu, jeśli tryb edycji jest aktywny
             if st.session_state.show_editor:
@@ -612,8 +617,15 @@ def main():
                     except Exception as e:
                         st.error(f"Błąd podczas zapisywania na Google Drive: {str(e)}")
                 else:
+                    # NAPRAWIONO: Obsługa błędów z zachowaniem kontekstu do naprawy
                     st.error(f"Błąd: {result['error']}")
                     st.session_state.error_info = result
+                    
+                    # Zabezpieczenie przed streamlit blokującym wyświetlanie błędów
+                    st.session_state["error_data"] = {
+                        "error": result['error'],
+                        "traceback": result['traceback']
+                    }
                     
                     # Dodaj więcej szczegółów diagnostycznych 
                     with st.expander("Szczegóły błędu", expanded=True):
@@ -634,36 +646,41 @@ def main():
                         if error_location != "Nieokreślona":
                             st.markdown(f"**Lokalizacja błędu:** {error_location}")
                     
-                    # Przycisk do naprawy kodu z ulepszoną funkcją
+                    # NAPRAWIONO: Przyciski do naprawy z unikalnymi kluczami
                     repair_col1, repair_col2 = st.columns([1, 1])
                     with repair_col1:
-                        if st.button("Napraw kod z pomocą AI"):
-                            st.session_state.fix_requested = True
-                            api_key = st.secrets["OPENROUTER_API_KEY"]
-                            fixed_code = fix_code_with_ai(
-                                code_to_execute,
-                                result["error"],
-                                result["traceback"],
-                                st.session_state.file_info,
-                                instruction,  # Dodajemy instrukcję użytkownika dla kontekstu
-                                model,
-                                api_key,
-                                max_attempts=2  # Ustawiamy 2 próby naprawy
-                            )
-                            
-                            if fixed_code:
-                                st.session_state.edited_code = fixed_code
-                                st.session_state.code_fixed = True
-                                st.success("Kod został naprawiony. Możesz teraz ponownie wykonać kod.")
-                                st.rerun()
-                            else:
-                                st.error("Nie udało się naprawić kodu automatycznie. Spróbuj ręcznej edycji.")
-                                st.session_state.show_editor = True
-                                st.rerun()
-                    
+                        if st.button("Napraw kod z pomocą AI", key="ai_repair_button", on_click=handle_fix_request):
+                            pass
+                        
                     with repair_col2:
-                        if st.button("Przejdź do ręcznej edycji"):
+                        if st.button("Przejdź do ręcznej edycji", key="manual_edit_button"):
                             st.session_state.show_editor = True
+                            st.rerun()
+                    
+                    # NAPRAWIONO: Obsługa żądania naprawy kodu z pomocą AI
+                    if st.session_state.fix_requested and st.session_state.error_info:
+                        api_key = st.secrets["OPENROUTER_API_KEY"]
+                        fixed_code = fix_code_with_ai(
+                            code_to_execute,
+                            result["error"],
+                            result["traceback"],
+                            st.session_state.file_info,
+                            instruction,
+                            model,
+                            api_key,
+                            max_attempts=2
+                        )
+                        
+                        if fixed_code:
+                            st.session_state.edited_code = fixed_code
+                            st.session_state.code_fixed = True
+                            st.session_state.fix_requested = False
+                            st.success("Kod został naprawiony. Możesz teraz ponownie wykonać kod.")
+                            st.rerun()
+                        else:
+                            st.error("Nie udało się naprawić kodu automatycznie. Spróbuj ręcznej edycji.")
+                            st.session_state.show_editor = True
+                            st.session_state.fix_requested = False
                             st.rerun()
         
         # Przycisk pobierania jeśli jest wygenerowany plik
@@ -709,5 +726,6 @@ def main():
         - **XML** - modyfikacja struktury, atrybutów i wartości
         - **CSV** - operacje na kolumnach, filtrowanie, agregacja
         """)
+        
 if __name__ == "__main__":
     main()
