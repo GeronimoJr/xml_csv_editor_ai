@@ -44,8 +44,12 @@ def initialize_session_state():
         st.session_state.output_bytes = None
     if "file_info" not in st.session_state:
         st.session_state.file_info = None
-    if "code_edited" not in st.session_state:
-        st.session_state.code_edited = False
+    if "show_editor" not in st.session_state:
+        st.session_state.show_editor = False
+    if "error_info" not in st.session_state:
+        st.session_state.error_info = None
+    if "code_fixed" not in st.session_state:
+        st.session_state.code_fixed = False
 
 
 def read_file_content(uploaded_file):
@@ -154,6 +158,61 @@ Nie dodawaj żadnych opisów ani komentarzy. Zwróć wyłącznie czysty kod Pyth
         return f"Błąd podczas komunikacji z API: {str(e)}"
 
 
+def fix_code_with_ai(code, error_message, traceback_str, file_type, model, api_key):
+    """Próbuje naprawić kod z użyciem AI"""
+    prompt = f"""
+Wygenerowany kod Python ma błąd. Napraw go, aby poprawnie działał.
+
+Kod:
+```python
+{code}
+Błąd:
+{error_message}
+
+Pełny traceback:
+{traceback_str}
+
+Ten kod ma przetwarzać plik {file_type.upper()}. Po naprawieniu, powinien:
+
+
+Wczytać plik z input_path
+
+Przetworzyć dane
+
+Zapisać wynik do output_path
+
+Zwróć tylko poprawiony kod, bez żadnych wyjaśnień, komentarzy czy nagłówków markdown.
+"""
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    data = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": "Jesteś ekspertem w naprawianiu kodu Python."},
+            {"role": "user", "content": prompt}
+        ]
+    }
+
+    try:
+        with st.spinner("Naprawianie kodu..."):
+            res = requests.post("https://openrouter.ai/api/v1/chat/completions", 
+                                headers=headers, json=data, timeout=60)
+            res.raise_for_status()
+            
+            fixed_code = res.json()["choices"][0]["message"]["content"]
+            # Czyszczenie kodu
+            fixed_code = re.sub(r"```(?:python)?\n", "", fixed_code)
+            fixed_code = fixed_code.replace("```", "")
+            
+            return clean_and_validate_code(fixed_code)
+            
+    except requests.exceptions.RequestException as e:
+        return None
+
+
 def clean_and_validate_code(code):
     """Czyści i waliduje wygenerowany kod"""
     # Usuwaj puste linie i whitespace
@@ -169,7 +228,7 @@ def clean_and_validate_code(code):
             except SyntaxError:
                 lines.pop()
         return "\n".join(lines)
-
+    
     return sanitize_code(code).strip()
 
 
@@ -179,7 +238,7 @@ def execute_code_safely(code_to_execute, file_info):
         with tempfile.TemporaryDirectory() as tmpdirname:
             input_path = os.path.join(tmpdirname, f"input.{file_info['type']}")
             output_path = os.path.join(tmpdirname, f"output.{file_info['type']}")
-            
+
             # Zapisz plik wejściowy
             with open(input_path, "wb") as f:
                 f.write(file_info["raw_bytes"])
@@ -218,10 +277,10 @@ def save_to_google_drive(output_bytes, file_info, instruction, code_executed):
         # Sprawdź, czy mamy wszystkie potrzebne dane konfiguracyjne
         drive_folder_id = st.secrets.get("GOOGLE_DRIVE_FOLDER_ID")
         credentials_json = st.secrets.get("GOOGLE_DRIVE_CREDENTIALS_JSON")
-        
+
         if not drive_folder_id or not credentials_json:
             return False, "Brak konfiguracji Google Drive."
-            
+        
         now = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         log_filename = f"history_{now}.txt"
         result_filename = f"output_{now}.{file_info['type']}"
@@ -250,7 +309,7 @@ def save_to_google_drive(output_bytes, file_info, instruction, code_executed):
                         return False, "Błąd dekodowania JSON z credentials"
                 else:
                     creds_dict = credentials_json
-                    
+                
                 scope = ["https://www.googleapis.com/auth/drive"]
                 credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
                 
@@ -301,28 +360,30 @@ def reset_app_state():
     st.rerun()
 
 
-def update_edited_code():
-    """Aktualizuje edytowany kod w stanie sesji"""
-    st.session_state.code_edited = True
+def toggle_editor():
+    """Przełącza widoczność edytora kodu"""
+    st.session_state.show_editor = not st.session_state.show_editor
+    if st.session_state.show_editor:
+        st.session_state.edited_code = st.session_state.generated_code
 
 
 def main():
     """Główna funkcja aplikacji"""
     # Ustawienia strony
     st.set_page_config(page_title="Edytor XML/CSV z AI", layout="centered")
-    
+
     # Uwierzytelnianie
     authenticate_user()
-    
+
     # Inicjalizacja stanu sesji
     initialize_session_state()
-    
+
     # Interfejs użytkownika - prosty layout
     st.title("Edytor AI plików XML i CSV")
-    
+
     # Zakładki
     tab1, tab2 = st.tabs(["Edycja pliku", "Pomoc"])
-    
+
     with tab1:
         st.markdown("""
         To narzędzie umożliwia modyfikację plików XML i CSV przy użyciu sztucznej inteligencji.
@@ -360,24 +421,40 @@ def main():
                     api_key
                 )
                 st.session_state.edited_code = st.session_state.generated_code
-                st.session_state.code_edited = False
-            
-        # Wyświetl wygenerowany kod do edycji
+                st.session_state.show_editor = False
+                st.session_state.code_fixed = False
+                st.session_state.error_info = None
+        
+        # Wyświetl wygenerowany kod
         if st.session_state.generated_code:
-            st.subheader("Edytuj kod przed wykonaniem:")
+            st.subheader("Wygenerowany kod Python:")
+            st.code(st.session_state.generated_code, language="python")
             
-            # Dodanie edytora kodu
-            st.session_state.edited_code = st.text_area(
-                "Edycja kodu",
-                value=st.session_state.edited_code if st.session_state.code_edited else st.session_state.generated_code,
-                height=400,
-                key="code_editor",
-                on_change=update_edited_code
-            )
+            # Przycisk do pokazania/ukrycia edytora
+            if st.button("Edytuj kod" if not st.session_state.show_editor else "Ukryj edytor"):
+                toggle_editor()
+            
+            # Wyświetl edytor kodu, jeśli tryb edycji jest aktywny
+            if st.session_state.show_editor:
+                st.session_state.edited_code = st.text_area(
+                    "Edycja kodu",
+                    value=st.session_state.edited_code,
+                    height=400,
+                    key="code_editor"
+                )
+            
+            # Wyświetl informacje o naprawionym kodzie
+            if st.session_state.code_fixed:
+                st.info("Kod został automatycznie naprawiony po wykryciu błędu.")
+                with st.expander("Pokaż naprawiony kod", expanded=False):
+                    st.code(st.session_state.edited_code, language="python")
+            
+            # Kod do wykonania
+            code_to_execute = st.session_state.edited_code if st.session_state.show_editor or st.session_state.code_fixed else st.session_state.generated_code
             
             if st.button("Wykonaj kod i zapisz wynik"):
                 result = execute_code_safely(
-                    st.session_state.edited_code, 
+                    code_to_execute, 
                     st.session_state.file_info
                 )
                 
@@ -391,20 +468,44 @@ def main():
                             st.session_state.output_bytes,
                             st.session_state.file_info,
                             instruction,
-                            st.session_state.edited_code
+                            code_to_execute
                         )
                         
                         if success:
                             st.success(f"✅ {message}")
                         else:
                             st.warning(f"⚠️ {message}")
-                            
+                        
                     except Exception as e:
                         st.error(f"Błąd podczas zapisywania na Google Drive: {str(e)}")
                 else:
                     st.error(f"Błąd: {result['error']}")
-                    with st.expander("Szczegóły błędu", expanded=False):
+                    st.session_state.error_info = result
+                    
+                    with st.expander("Szczegóły błędu", expanded=True):
                         st.code(result["traceback"])
+                    
+                    # Automatyczna próba naprawy kodu
+                    st.warning("Próbuję automatycznie naprawić kod...")
+                    api_key = st.secrets["OPENROUTER_API_KEY"]
+                    fixed_code = fix_code_with_ai(
+                        code_to_execute,
+                        result["error"],
+                        result["traceback"],
+                        st.session_state.file_info["type"],
+                        model,
+                        api_key
+                    )
+                    
+                    if fixed_code:
+                        st.session_state.edited_code = fixed_code
+                        st.session_state.code_fixed = True
+                        st.success("Kod został naprawiony. Możesz teraz ponownie wykonać kod.")
+                        st.rerun()
+                    else:
+                        st.error("Nie udało się automatycznie naprawić kodu. Spróbuj ręcznej edycji.")
+                        st.session_state.show_editor = True
+                        st.rerun()
         
         # Przycisk pobierania jeśli jest wygenerowany plik
         if st.session_state.output_bytes:
@@ -422,7 +523,7 @@ def main():
             # Dodanie przycisku "Ponowna edycja" na końcu
             if st.button("Ponowna edycja"):
                 reset_app_state()
-    
+
     with tab2:
         st.markdown("""
         ### Jak korzystać z aplikacji
@@ -430,9 +531,10 @@ def main():
         1. **Wgraj plik XML lub CSV** - aplikacja automatycznie wykryje kodowanie
         2. **Wpisz instrukcję** - opisz w języku naturalnym, co chcesz zmodyfikować
         3. **Wygeneruj kod** - AI stworzy kod Pythona wykonujący twoje polecenie
-        4. **Edytuj kod** - zmodyfikuj wygenerowany kod według potrzeb
+        4. **Opcjonalnie: Edytuj kod** - kliknij przycisk "Edytuj kod", aby zmodyfikować wygenerowany kod
         5. **Wykonaj kod** - przetworzy twoje dane według instrukcji
-        6. **Pobierz wynik** - zapisz przetworzony plik lokalnie
+        6. **W przypadku błędu** - aplikacja automatycznie spróbuje naprawić kod
+        7. **Pobierz wynik** - zapisz przetworzony plik lokalnie
         
         ### Przykłady instrukcji
         
@@ -446,7 +548,5 @@ def main():
         - **XML** - modyfikacja struktury, atrybutów i wartości
         - **CSV** - operacje na kolumnach, filtrowanie, agregacja
         """)
-
-
 if __name__ == "__main__":
     main()
